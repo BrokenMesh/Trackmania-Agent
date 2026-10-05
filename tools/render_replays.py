@@ -120,6 +120,7 @@ class Sink:
     keep_bad: bool = False  # keep episodes with quality problems / desync / unfinished
     require_finished: bool = True
     limit: int | None = None  # stop after this many new episodes
+    desync_retries: int = 1  # re-render a desynced run this often before rejecting it
     rendered: list[str] = field(default_factory=list)
     resumed: int = 0
     skipped: list[dict[str, str]] = field(default_factory=list)
@@ -180,14 +181,7 @@ class Sink:
         }
         t0 = time.perf_counter()
         try:
-            ep = render_episode(
-                self.game,
-                job.timeline,
-                job.map_ref,
-                cfg.data,
-                meta,
-                expected_time_ms=job.expected_time_ms,
-            )
+            ep = self._render_with_retries(job, meta)
         except Exception as exc:
             self.errors += 1
             self.skip(eid, f"render_error: {type(exc).__name__}: {exc}")
@@ -213,6 +207,28 @@ class Sink:
         self.known.add(eid)
         self.rendered.append(eid)
         return True
+
+    def _render_with_retries(self, job: Job, meta: dict[str, Any]):
+        """VERIFIED need (TMNF): runs that desynced in a long render re-drove exactly on later
+        attempts after a fresh map load, so a desync is retried (with a map reload when the
+        game supports it) before the run is rejected."""
+        for attempt in range(self.desync_retries + 1):
+            ep = render_episode(
+                self.game,
+                job.timeline,
+                job.map_ref,
+                self.cfg.data,
+                meta,
+                expected_time_ms=job.expected_time_ms,
+            )
+            if not ep.meta["desync"]:
+                return ep
+            if attempt < self.desync_retries:
+                print(f"  {job.episode_id}: desync, retrying ({attempt + 1}/{self.desync_retries})")
+                forget_loaded_map = getattr(self.game, "forget_loaded_map", None)
+                if forget_loaded_map is not None:
+                    forget_loaded_map()
+        return ep
 
     def summary(self) -> dict[str, Any]:
         reasons = Counter(s["reason"].split(":")[0] for s in self.skipped)
@@ -623,6 +639,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--overwrite", action="store_true", help="re-render episodes already stored")
     ap.add_argument("--allow-respawns", action="store_true", help="keep replays with respawns")
     ap.add_argument(
+        "--desync-retries", type=int, default=1, help="re-render a desynced run N times first"
+    )
+    ap.add_argument(
         "--keep-bad", action="store_true", help="keep episodes failing the quality check"
     )
     ap.add_argument("--seed", type=int, default=0, help="--fake: driver seed offset")
@@ -638,6 +657,7 @@ def main(argv: list[str] | None = None) -> int:
         "overwrite": args.overwrite,
         "keep_bad": args.keep_bad,
         "limit": args.limit,
+        "desync_retries": args.desync_retries,
     }
     if args.fake is not None:
         if cfg.game.backend != "fake":

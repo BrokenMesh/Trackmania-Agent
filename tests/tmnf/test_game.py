@@ -289,3 +289,13 @@ def test_realtime_to_sync_switch_pauses(game, server):
     t1 = game.step(Action(), 10).race_time_ms
     assert t1 == 100
     assert game.latest_frame() is None  # realtime-only API outside realtime mode
+
+
+def test_the_loaded_map_is_not_loaded_again(game, server):
+    game.load_map("Alpha")
+    game.load_map("Alpha")
+    assert [c.name for c in server.commands].count("LOAD_MAP") == 1
+    assert game.start_race().race_time_ms == 0
+    (Path(game.cfg.map_dir) / "Beta.Challenge.Gbx").write_bytes(b"GBX")
+    game.load_map("Beta")
+    assert [c.name for c in server.commands].count("LOAD_MAP") == 2

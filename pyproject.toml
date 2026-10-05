@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.4"]
+dev = ["pytest>=7", "ruff>=0.4", "pillow>=10"]  # pillow: tools/episode_gif.py
 # Real backbones (optional, downloads weights only when configured).
 vision = ["timm>=1.0", "transformers>=4.49"]
 # Windows machine with TMNF + TMInterface.

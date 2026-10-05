@@ -124,6 +124,7 @@ class GameConfig:
     map_path_style: str = "auto"  # how the `map` command argument is written
     frame_settle_renders: int = 1  # Render() calls to wait before a capture
     capture_flip_vertical: bool = False  # screenshot row order
+    focus_window: bool = False  # focus the game window before each map load (intro needs focus)
     # fake backend
     fake_track: str = "oval"
 

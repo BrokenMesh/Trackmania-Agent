@@ -295,8 +295,9 @@ def test_load_replay_meta_with_a_fake_pygbx(monkeypatch, tmp_path):
         GbxType=types.SimpleNamespace(CTN_GHOST="GHOST", REPLAY_RECORD="REC", CHALLENGE="CH"),
     )
     monkeypatch.setitem(sys.modules, "pygbx", mod)
+    (tmp_path / "a.Replay.Gbx").write_bytes(b"GBX fake")
     ev, meta = R.load_replay(tmp_path / "a.Replay.Gbx")
-    assert ev == [(10, "accelerate", 1.0), (1230, "_fake_finish_line", 1.0)]
+    assert ev == [(0, "accelerate", 1.0), (1220, "_fake_finish_line", 1.0)]  # GBX_INPUT_LEAD_MS
     assert meta == {
         "map_uid": "MAPUID", "map_name": "Map", "map_author": "auth", "player": "driver",
         "race_time_ms": 1230, "num_respawns": 0, "cp_times": [500, 1230], "game_version": "TMNF",
@@ -306,3 +307,56 @@ def test_load_replay_meta_with_a_fake_pygbx(monkeypatch, tmp_path):
     challenge.map_uid = ""
     _, meta2 = R.load_replay(tmp_path / "a.Replay.Gbx")
     assert meta2["map_uid"] == "GHOSTUID"
+
+
+def test_align_gbx_events_measures_from_race_start_and_leads_one_tick():
+    offset = [
+        (65535, "_fake_is_race_running", 1.0),
+        (65545, "accelerate", 1.0),
+        (66356, "steer_right", 1.0),
+    ]
+    assert R.align_gbx_events(offset) == [
+        (-10, "_fake_is_race_running", 1.0), (0, "accelerate", 1.0), (811, "steer_right", 1.0),
+    ]  # fmt: skip
+    no_start = [(10, "accelerate", 1.0)]
+    assert R.align_gbx_events(no_start) == [(0, "accelerate", 1.0)]
+
+
+def test_map_uid_from_replay_header(tmp_path):
+    p = tmp_path / "a.Replay.Gbx"
+    p.write_bytes(
+        b'GBX\x06\x00BUCR<header type="replay" version="TMr.7" exever="2.11.16">'
+        b'<challenge uid="BeySZdnfuSh4nHY5xztiXLmlrXe"/><times best="36020"/></header>\x00\x01'
+    )
+    assert R.map_uid_from_replay_header(p) == "BeySZdnfuSh4nHY5xztiXLmlrXe"
+    (tmp_path / "b.Replay.Gbx").write_bytes(b"GBX no xml header")
+    assert R.map_uid_from_replay_header(tmp_path / "b.Replay.Gbx") is None
+    assert R.map_uid_from_replay_header(tmp_path / "missing.Replay.Gbx") is None
+
+
+def test_steer_left_wins_while_both_keys_are_held():
+    events = [
+        (0, "accelerate", 1.0),
+        (100, "steer_right", 1.0),
+        (150, "steer_left", 1.0),  # right is held: left takes over
+        (200, "steer_left", 0.0),  # right still held: right is back
+        (300, "steer_right", 0.0),
+        (400, "steer_left", 1.0),
+        (450, "steer_right", 1.0),  # no effect while left is held
+        (500, "steer_right", 0.0),
+        (600, "steer_left", 0.0),
+    ]
+    assert R.resolve_steer_overlap(events) == [
+        (0, "accelerate", 1.0),
+        (100, "steer_right", 1.0),
+        (150, "steer_left", 1.0),
+        (150, "steer_right", 0.0),
+        (200, "steer_left", 0.0),
+        (200, "steer_right", 1.0),
+        (300, "steer_right", 0.0),
+        (400, "steer_left", 1.0),
+        (600, "steer_left", 0.0),
+    ]
+    tl = R.replay_to_timeline(R.resolve_steer_overlap(events), {"race_time_ms": 700})
+    steer = tl.actions[:, 0]
+    assert steer[17] == -1.0 and steer[25] == 1.0 and steer[47] == -1.0 and steer[65] == 0.0

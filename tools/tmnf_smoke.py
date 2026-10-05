@@ -41,6 +41,7 @@ from tmagent.game.tmnf.game import TMNFGame  # noqa: E402
 from tmagent.interfaces import PHYSICS_TICK_MS, Action  # noqa: E402
 
 GAS = Action(gas=1.0)
+MIN_GAS_SPEED_KMH = 10.0  # 1 s of full gas reaches ~58 km/h on A01-Race
 FAKE_SCRIPT = """# synthetic TMI input script used with --fake
 0-4500 press up
 500-900 press right
@@ -51,8 +52,13 @@ HINTS = {
     "Send tmagent_status output and plugin log lines (paused guard / drift) to the developer.",
     "plugin diagnostics": "The plugin had to rewind to hold the pause (SetSpeed(0) is not "
     "immediate). Try --set game.render_speed=1 (fewer ticks per frame) and rerun.",
-    "replay re-drive": "Try --tick-offset 1 (input timing is UNVERIFIED), check the map uid line, "
-    "and that the replay has no respawns (meta respawns).",
+    "replay re-drive": "Check the map uid line and that the replay is keyboard-only: analog "
+    "steering (pad/wheel) drifts off with steer_mode binary (replay.is_keyboard_replay).",
+    "load map": "If the TMInterface console says 'The map was successfully queued' but the game "
+    "stays in the menu, the map file was added after the game started: restart the game "
+    "(it scans the Tracks folder only at startup).",
+    "step with gas": "The game window had no focus while the map intro played, so the car is "
+    "locked: keep game.focus_window: true and do not click into other windows during a run.",
 }
 
 
@@ -511,7 +517,10 @@ def do_step(game: TMNFGame, rep: Report, n: int) -> None:
     assert st.race_time_ms == n * PHYSICS_TICK_MS, (
         f"race time {st.race_time_ms} ms, expected {n * PHYSICS_TICK_MS}"
     )
-    assert st.speed_kmh > 0, "speed is 0 after full gas (is the input reaching the game?)"
+    assert st.speed_kmh > MIN_GAS_SPEED_KMH, (
+        f"speed {st.speed_kmh:.2f} km/h after full gas: the input is not reaching the car "
+        "(game window not focused during the map intro?)"
+    )
     detail = f"{n} ticks -> race time {st.race_time_ms} ms, speed {st.speed_kmh:.1f} km/h, "
     rep.add("PASS", "step with gas", detail + f"{dt:.1f} ms wall")
 

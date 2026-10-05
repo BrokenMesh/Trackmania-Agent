@@ -19,7 +19,8 @@ Modes:
             --per-track of them spread over the ranks (best, median, tail: mixed driver
             quality), download the map to game.map_dir (<map_uid or track id>.Challenge.Gbx
             plus map_dir/index.json {uid: file}) and the replays to --replays-dir
-            (<track id>-<replay id>.Replay.Gbx).
+            (<track id>-<replay id>.Replay.Gbx). --best/--worst replace the rank spread with
+            the fastest, the slowest and a random middle; --max-time-factor drops AFK runs.
 Resumable: <out>/state.json records finished downloads and the tracks cursor, API responses
 are cached in <out>/cache/. --dry-run prints the requests without sending any (cached
 responses are used to expand them, otherwise only the first-level requests are shown).
@@ -33,6 +34,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import random
 import re
 import sys
 import time
@@ -233,7 +235,9 @@ class State:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self.data: dict[str, Any] = {"tracks": {}, "maps": {}, "replays": {}, "failed": {}}
+        self.data: dict[str, Any] = {
+            "tracks": {}, "maps": {}, "replays": {}, "failed": {}, "rejected": {},
+        }  # fmt: skip
         if path.is_file():
             self.data.update(json.loads(path.read_text(encoding="utf-8")))
 
@@ -327,6 +331,42 @@ def select_spread(items: Sequence[Any], n: int) -> list[Any]:
         return [items[0]]
     idx = sorted({round(i * (len(items) - 1) / (n - 1)) for i in range(n)})
     return [items[i] for i in idx]
+
+
+Group = tuple[int, list[Any]]  # (quota, candidates in the order they are tried)
+
+
+def spread_groups(items: Sequence[Any], n: int) -> list[Group]:
+    """select_spread as groups of one candidate each (no replacement for a rejected pick)."""
+    return [(1, [item]) for item in select_spread(items, n)]
+
+
+def mixed_groups(
+    items: Sequence[Any], n: int, n_best: int, n_worst: int, rng: random.Random
+) -> list[Group]:
+    """n_best fastest, n_worst slowest and a random middle sample; a rejected candidate is
+    replaced by the next fastest / next slowest / next random one."""
+    n = max(n, 0)
+    n_best = min(n_best, n)
+    n_worst = min(n_worst, n - n_best)
+    middle = list(items[n_best : len(items) - n_worst])
+    rng.shuffle(middle)
+    groups = [
+        (n_best, list(items)),
+        (n_worst, list(reversed(items))),
+        (n - n_best - n_worst, middle),
+    ]
+    return [g for g in groups if g[0] > 0]
+
+
+def cap_replay_time(
+    items: Sequence[dict[str, Any]], max_factor: float | None
+) -> list[dict[str, Any]]:
+    """Drop replays slower than max_factor x the fastest one (AFK runs of many hours exist)."""
+    if not max_factor or not items:
+        return list(items)
+    limit = get_path(items[0], F_REPLAY_TIME) * max_factor
+    return [r for r in items if get_path(r, F_REPLAY_TIME) <= limit]
 
 
 def list_replays(client: TMXClient, track_id: str, max_listed: int) -> list[dict[str, Any]] | None:
@@ -424,8 +464,16 @@ def fetch_replays(
     replays_dir: Path,
     max_listed: int,
     with_maps: bool = True,
+    select: Callable[[list[dict[str, Any]], int], list[Group]] = spread_groups,
+    max_time_factor: float | None = None,
+    accept: Callable[[Path], bool] | None = None,
+    max_tries: int = 100,
 ) -> int:
-    """Maps and rank-spread replays of `tracks`; returns the number of replays downloaded."""
+    """Maps and selected replays of `tracks`; returns the number of replays downloaded.
+
+    `accept` checks each downloaded replay; a rejected one is deleted, remembered in the
+    state and replaced by the next candidate of its group (at most max_tries per group).
+    """
     total = 0
     for i, rec in enumerate(tracks, 1):
         tid = str(get_path(rec, F_TRACK_ID))
@@ -440,37 +488,77 @@ def fetch_replays(
             continue
         if listed is None:
             continue
-        chosen = select_spread(listed, per_track)
-        print(f"  {len(listed)} replays listed, {len(chosen)} chosen")
-        for rec_r in chosen:
-            rid = str(get_path(rec_r, F_REPLAY_ID))
-            if (
-                rid in state.data["replays"]
-                and (replays_dir / state.data["replays"][rid]["file"]).is_file()
-            ):
-                continue
-            dest = replays_dir / f"{tid}-{rid}{REPLAY_SUFFIX}"
-            try:
-                got = client.download(EP_REPLAY_FILE.format(id=rid), dest)
-            except TMXError as exc:
-                print(f"  replay {rid} failed: {exc}")
-                state.fail(f"replay:{rid}", str(exc))
-                continue
-            if got is None:
-                continue
-            rank = listed.index(rec_r) + 1
-            state.data["replays"][rid] = {
-                "file": dest.name,
-                "track_id": tid,
-                "rank": rank,
-                "of": len(listed),
-                "time_ms": get_path(rec_r, F_REPLAY_TIME),
-                "user": get_path(rec_r, F_REPLAY_USER),
-            }
-            state.save()
-            total += 1
-            print(f"  replay {rid} rank {rank}/{len(listed)} -> {dest.name}")
+        listed = cap_replay_time(listed, max_time_factor)
+        groups = select(listed, per_track)
+        print(f"  {len(listed)} replays listed, {sum(q for q, _ in groups)} wanted")
+        rank_of = {id(r): k for k, r in enumerate(listed, 1)}
+        used: set[str] = set()
+        for quota, candidates in groups:
+            kept = tries = 0
+            for rec_r in candidates:
+                if kept >= quota or tries >= max_tries:
+                    break
+                rid = str(get_path(rec_r, F_REPLAY_ID))
+                if rid in used or rid in state.data["rejected"]:
+                    continue
+                used.add(rid)
+                tries += 1
+                rank = rank_of[id(rec_r)]
+                result = download_replay(
+                    client, state, rec_r, tid, rank, len(listed), replays_dir, accept
+                )
+                if result == "rejected":
+                    print(f"  replay {rid} rank {rank}/{len(listed)} rejected")
+                elif result in ("new", "have"):
+                    kept += 1
+                    total += result == "new"
+            if kept < quota:
+                print(f"  only {kept}/{quota} of a group kept after {tries} candidates")
     return total
+
+
+def download_replay(
+    client: TMXClient,
+    state: State,
+    rec_r: dict[str, Any],
+    tid: str,
+    rank: int,
+    of: int,
+    replays_dir: Path,
+    accept: Callable[[Path], bool] | None,
+) -> str:
+    """Download one replay: "new", "have" (already on disk), "rejected" or "failed"."""
+    rid = str(get_path(rec_r, F_REPLAY_ID))
+    known = state.data["replays"].get(rid)
+    dest = replays_dir / (known["file"] if known else f"{tid}-{rid}{REPLAY_SUFFIX}")
+    if not (known and dest.is_file()):
+        try:
+            got = client.download(EP_REPLAY_FILE.format(id=rid), dest)
+        except TMXError as exc:
+            print(f"  replay {rid} failed: {exc}")
+            state.fail(f"replay:{rid}", str(exc))
+            return "failed"
+        if got is None:
+            return "failed"
+    if accept is not None and not accept(dest):
+        dest.unlink()
+        state.data["replays"].pop(rid, None)
+        state.data["rejected"][rid] = tid
+        state.save()
+        return "rejected"
+    if known:
+        return "have"
+    state.data["replays"][rid] = {
+        "file": dest.name,
+        "track_id": tid,
+        "rank": rank,
+        "of": of,
+        "time_ms": get_path(rec_r, F_REPLAY_TIME),
+        "user": get_path(rec_r, F_REPLAY_USER),
+    }
+    state.save()
+    print(f"  replay {rid} rank {rank}/{of} -> {dest.name}")
+    return "new"
 
 
 # ---------------------------------------------------------------- CLI
@@ -504,6 +592,21 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--max-listed", type=int, default=1000, help="replays listed per track")
     r.add_argument("--max-tracks", type=int, default=None, help="process at most N tracks")
     r.add_argument("--no-maps", action="store_true", help="skip the map downloads")
+    r.add_argument(
+        "--best", type=int, default=None, help="fastest replays per track; with --worst the rest "
+        "is a random sample of the middle instead of the rank spread",
+    )  # fmt: skip
+    r.add_argument("--worst", type=int, default=0, help="slowest replays per track (after the cap)")
+    r.add_argument(
+        "--max-time-factor", type=float, default=None, help="skip replays slower than this "
+        "factor x the fastest one; list the whole track with --max-listed for a real tail",
+    )  # fmt: skip
+    r.add_argument("--seed", type=int, default=0, help="random middle sample seed")
+    r.add_argument(
+        "--keyboard-only", action="store_true", help="keep only replays without analog "
+        "steer/gas (needs pygbx); rejected ones are replaced by the next candidate",
+    )  # fmt: skip
+    r.add_argument("--max-tries", type=int, default=100, help="replay candidates per group")
     return ap
 
 
@@ -549,6 +652,18 @@ def main(
             print(f"{n} tracks in {out / 'tracks.jsonl'} ({client.requests} requests)")
         else:
             tracks = _replay_tracks(args, out)
+            select: Callable[[list[dict[str, Any]], int], list[Group]] = spread_groups
+            if args.best is not None or args.worst:
+                rng = random.Random(args.seed)
+                n_best = args.best or 0
+
+                def select(items: list[dict[str, Any]], n: int) -> list[Group]:
+                    return mixed_groups(items, n, n_best, args.worst, rng)
+
+            accept = None
+            if args.keyboard_only:
+                from tmagent.game.tmnf.replay import is_keyboard_replay as accept
+
             n = fetch_replays(
                 client,
                 state,
@@ -559,6 +674,10 @@ def main(
                 Path(args.replays_dir),
                 args.max_listed,
                 with_maps=not args.no_maps,
+                select=select,
+                max_time_factor=args.max_time_factor,
+                accept=accept,
+                max_tries=args.max_tries,
             )
             print(f"{n} replays downloaded ({client.requests} requests), maps in {map_dir}")
     except (TMXError, ValueError, FileNotFoundError) as exc:

@@ -158,3 +158,24 @@ with `config.yaml`, `git.txt` (hash + dirty flag), `seed`, `metrics.jsonl`,
 - `tools/fake_pipeline.py` exercises the full chain on FakeGame: scripted
   expert runs -> render episodes -> dataset -> train a tiny model for a few
   steps -> closed-loop eval -> live loop for a few seconds.
+
+## TMNF bridge (`tmagent/game/tmnf`)
+
+Facts and sources: `docs/research.md`. Decisions D-008..D-010.
+
+- `plugin/TMAgentLink.as`: our TMInterface 2.x AngelScript plugin, TCP server
+  on `game.tmi_port`. Protocol spec: `tmagent/game/tmnf/PROTOCOL.md`.
+- `client.py`: Python socket client (framing, reader thread, demux).
+- `game.py`: `TMNFGame(game_cfg, data_cfg)` implementing `SyncGame` and
+  `RealtimeGame` on top of the client.
+  - Sync (rendering, eval): game paused (`SetSpeed(0)`) between commands;
+    `step(action, n)` runs n ticks then pauses; `grab_frame()` captures via
+    `Graphics::CaptureScreenshot(vec2(W, H))` in `Render()` while paused, so
+    the image shows exactly the current tick.
+  - Realtime (live): game at `game_speed`; the plugin applies the latest
+    received input every tick; frames pushed at the configured size.
+  - Binary steering by default (`steer_mode`), see D-010.
+- `replay.py`: `.Replay.Gbx` -> normalized events -> `InputTimeline` (pygbx,
+  optional) and TMI input-script text -> `InputTimeline` (no GPL code).
+- `tests/tmnf/`: protocol tests against a Python fake plugin server that
+  speaks the same protocol (the real game cannot run in CI).

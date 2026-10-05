@@ -109,10 +109,16 @@ class EvalConfig:
 class GameConfig:
     backend: str = "fake"  # fake | tmnf
     # tmnf backend (see docs/setup_windows.md)
-    tmi_port: int = 8477
-    game_speed: float = 1.0
+    tmi_host: str = "127.0.0.1"
+    tmi_port: int = 8477  # TMAgentLink plugin listen port (TMI `set custom_port` + offset)
+    connect_timeout_s: float = 30.0
+    game_speed: float = 1.0  # live play speed (1.0 = real time)
+    render_speed: float = 10.0  # sim speed between captured frames when rendering replays
+    steer_mode: str = "binary"  # binary (left/right keys, verified API) | analog (InputType::Steer)
+    steer_threshold: float = 0.5  # |steer| above this -> key press in binary mode
     window_size: list[int] = field(default_factory=lambda: [640, 480])
     camera: str = "cam1"
+    map_dir: str = "data/tmnf/maps"  # .Challenge.Gbx files, resolved by map_uid or name
     # fake backend
     fake_track: str = "oval"
 

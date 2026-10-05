@@ -50,3 +50,26 @@ and rejected. Numbers only from own measurements.
   128x96 RGB at 20 fps) instead of tar shards. Reconsider if file count or
   read throughput becomes a problem.
 - Status: accepted.
+
+## D-008 (2026-10-05) GPL tools stay optional
+- pygbx (GPL-3) and the `tminterface` pip package (GPL-3, TMI 1.x only) are
+  not required dependencies. pygbx is an optional extra used only inside
+  `tmagent/game/tmnf/replay.py`; the TMI input-script path (`dump_inputs`
+  text) needs no GPL code. The repository has no license yet; the user decides.
+- Status: accepted.
+
+## D-009 (2026-10-05) Own TMI 2.x plugin instead of reusing Linesight code
+- Linesight has no LICENSE file (MIT only declared in setup.py). tmagent
+  writes its own AngelScript plugin (`TMAgentLink.as`) and Python client with
+  its own protocol, using only the TMI plugin API calls listed in
+  research.md. API names marked UNVERIFIED are collected in one place in the
+  plugin and must be checked against the installed TMI version (Phase 0).
+- Status: accepted.
+
+## D-010 (2026-10-05) Binary steering by default on TMNF
+- Most TMX replays come from keyboard drivers (binary steer events), and
+  `SetInputState(InputType::Left/Right)` is verified, while analog steer
+  injection (`InputType::Steer`) is only snippet-verified and in TMI 1.x
+  needed a detected gamepad. `game.steer_mode = binary` (threshold 0.5);
+  `analog` available once verified on the user's machine.
+- Status: accepted, revisit in Phase 0.

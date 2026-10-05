@@ -25,6 +25,15 @@ and rejected. Numbers only from own measurements.
   runtime.control_hz = 60`), all code takes the rate from config.
 - Open: 50 Hz (every 2nd tick) aligns exactly with physics and is the
   recommended alternative. Decide by closed-loop metrics in Phase 2.
+- Measured on FakeGame (eval agent): labels at any control rate < 100 Hz
+  drop input changes that last less than one control period. A per-tick
+  scripted driver replayed from 60 Hz labels drifts up to 4.2 m on the oval
+  and leaves the road on `fake:random:3`; a driver that holds inputs for
+  100 ms replays exactly at 60 and 50 Hz. Real keyboard replays contain short
+  taps, so expect label loss; `tmagent.data.quality` should report the share
+  of input changes lost by resampling (todo).
+- Execution mapping (tick i uses the latest control row with time
+  < 10(i+1)) lives in `tmagent.eval.harness.control_row_for_tick`.
 - Status: open.
 
 ## D-004 (2026-10-05) One action token per frame step

@@ -7,6 +7,7 @@ from tmagent.data.timeline import (
     control_times_ms,
     frame_times_ms,
     grid_len,
+    resample_loss,
     resample_to_control,
     timeline_from_events,
 )
@@ -189,3 +190,62 @@ def test_resample_covers_all_control_times_below_duration():
 def test_resample_empty_timeline():
     actions, times = resample_to_control(InputTimeline(actions=np.zeros((0, 3), np.float32)), 60)
     assert actions.shape == (0, 3) and times.shape == (0,)
+
+
+def test_resample_loss_constant_and_held_inputs_are_lossless():
+    # 100 ms holds starting on multiples of 100 ms survive 60 Hz sampling exactly
+    acts = np.zeros((100, 3), np.float32)
+    acts[:, 1] = 1
+    acts[:10, 0], acts[10:20, 0], acts[50:60, 0] = 1, -1, 1
+    acts[30:70, 2] = 1
+    out = resample_loss(InputTimeline(acts), 60)
+    assert out["ticks"] == 100 and out["mismatch_frac"] == 0.0
+    assert out["lost_changes"] == 0 and out["lost_changes_frac"] == 0.0 and out["changes"] > 0
+    out = resample_loss(tl([], duration_ms=500), 60)  # no inputs at all
+    assert out["mismatch_frac"] == 0.0 and out["changes"] == 0 and out["lost_changes_frac"] == 0.0
+
+
+def test_resample_loss_at_the_physics_rate_is_lossless():
+    acts = np.zeros((40, 3), np.float32)
+    acts[7, 0] = acts[8, 1] = acts[13, 2] = acts[14, 0] = 1  # single-tick taps
+    out = resample_loss(InputTimeline(acts), 100)
+    assert out["mismatch_frac"] == 0.0 and out["lost_changes"] == 0 and out["changes"] == 8
+
+
+def test_resample_loss_short_tap_between_samples_is_lost():
+    # 50 Hz labels sit on even ticks: a one-tick brake tap on tick 21 is never sampled
+    acts = np.zeros((100, 3), np.float32)
+    acts[21, 2] = 1
+    out = resample_loss(InputTimeline(acts), 50)
+    assert out["changes"] == 2 and out["lost_changes"] == 2 and out["lost_changes_frac"] == 1.0
+    assert out["mismatch_frac"] == pytest.approx(0.01)  # only tick 21 itself differs
+    # a tap on an even tick is sampled; the hold then extends it over the next tick
+    acts = np.zeros((100, 3), np.float32)
+    acts[20, 2] = 1
+    out = resample_loss(InputTimeline(acts), 50)
+    assert out["lost_changes"] == 0 and out["mismatch_frac"] == pytest.approx(0.01)
+
+
+def test_resample_loss_counts_changes_per_channel():
+    # steer and brake both change on tick 21 and revert on tick 22: 4 changes, none visible
+    acts = np.zeros((100, 3), np.float32)
+    acts[21, 0] = acts[21, 2] = 1
+    out = resample_loss(InputTimeline(acts), 50)
+    assert out["changes"] == 4 and out["lost_changes"] == 4
+    # simultaneous changes of two channels that persist are both visible at the next label
+    acts = np.zeros((100, 3), np.float32)
+    acts[21:, 0] = acts[21:, 1] = 1
+    out = resample_loss(InputTimeline(acts), 50)
+    assert out["changes"] == 2 and out["lost_changes"] == 0
+    assert out["mismatch_frac"] == pytest.approx(0.01)  # only tick 21 (label ticks are even)
+
+
+def test_resample_loss_merges_changes_between_two_labels():
+    # 25 Hz labels sit on ticks 0, 4, 8, ...; steer goes 0 -> 1 -> -1 on ticks 21 and 22,
+    # the labels at 20 and 24 show 0 and -1: 2 changes, 1 visible
+    acts = np.zeros((100, 3), np.float32)
+    acts[21, 0], acts[22:, 0] = 1, -1
+    out = resample_loss(InputTimeline(acts), 25)
+    assert out["changes"] == 2 and out["lost_changes"] == 1
+    assert out["lost_changes_frac"] == pytest.approx(0.5)
+    assert out["mismatch_frac"] == pytest.approx(0.03)  # ticks 21, 22, 23 hold the label at 20

@@ -202,7 +202,7 @@ EPISODE_META_KEYS = (
     "renderer",  # str, tool + version / git hash
 )
 
-# Optional meta keys written by tmagent.data.render / episode_io.
+# Optional meta keys written by tmagent.data.render / episode_io / tools/render_replays.py.
 EPISODE_META_OPTIONAL_KEYS = (
     "format",  # int, storage format version (2 = per-frame zlib, see ARCHITECTURE.md)
     "finish_time_ms",  # int | None, race time when the game reported finished
@@ -211,4 +211,5 @@ EPISODE_META_OPTIONAL_KEYS = (
     "frame_time_mismatch",  # int, frames whose reported race time != tick time at grab
     "resized_frames",  # int, frames resized because the capture size was wrong
     "respawns",  # int, respawn events in the source replay
+    "resample_loss",  # dict, input changes lost by control-rate resampling (timeline.resample_loss)
 )

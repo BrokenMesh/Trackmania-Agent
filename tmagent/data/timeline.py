@@ -124,3 +124,42 @@ def resample_to_control(timeline: InputTimeline, control_hz: int) -> tuple[np.nd
     times = control_times_ms(grid_len(total_ms, control_hz), control_hz)
     actions = timeline.actions[times // PHYSICS_TICK_MS].astype(np.float32)
     return actions, times
+
+
+def resample_loss(timeline: InputTimeline, control_hz: int) -> dict[str, float | int]:
+    """How much of the tick timeline survives control-rate labels.
+
+    The labels are `resample_to_control(timeline, control_hz)`; a tick is replayed with
+    the latest label whose control time lies in or before it (the execution mapping of
+    tmagent.eval.harness.control_row_for_tick). Returns
+      ticks            number of physics ticks,
+      mismatch_frac    fraction of ticks whose replayed input differs from the original,
+      changes          input changes (per channel) on the tick grid,
+      lost_changes     changes that are not visible in the control-rate labels
+                       (changes - changes between consecutive labels; a tap shorter than
+                       the control period that falls between two samples counts as 2),
+      lost_changes_frac  lost_changes / changes (0 without changes).
+    """
+    acts = timeline.actions
+    n = len(acts)
+    labels, times = resample_to_control(timeline, control_hz)
+    if n == 0:
+        return {
+            "ticks": 0,
+            "mismatch_frac": 0.0,
+            "changes": 0,
+            "lost_changes": 0,
+            "lost_changes_frac": 0.0,
+        }
+    label_ticks = times // PHYSICS_TICK_MS  # nondecreasing, starts at tick 0
+    src = label_ticks[np.searchsorted(label_ticks, np.arange(n), side="right") - 1]
+    mismatch = (acts[src] != acts).any(axis=1)
+    changes = int((acts[1:] != acts[:-1]).sum())
+    seen = int((labels[1:] != labels[:-1]).sum())
+    return {
+        "ticks": n,
+        "mismatch_frac": float(mismatch.mean()),
+        "changes": changes,
+        "lost_changes": changes - seen,
+        "lost_changes_frac": (changes - seen) / changes if changes else 0.0,
+    }

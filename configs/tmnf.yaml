@@ -1,0 +1,52 @@
+# TrackMania Nations Forever through TMInterface (Windows, see docs/setup_windows.md).
+# Typical flow (each step is a CLI of this repo, run on the machine that has the game):
+#   python tools/system_report.py                       # Phase 0.1
+#   python tools/measure_latency.py --config configs/tmnf.yaml --map <uid or file>   # Phase 0.4/0.5
+#   python tools/tmx_download.py --help                 # maps + replays (read the TMX terms first)
+#   python tools/render_replays.py --config configs/tmnf.yaml --replays data/tmnf/replays
+#   python -m tmagent.train.train_bc --config configs/tmnf.yaml
+#   python -m tmagent.eval.harness --config configs/tmnf.yaml --ckpt <ckpt> --set eval.maps=[...]
+# Experiments combine this file with ablation configs via --set, e.g. data.history_s=0.
+name: tmnf
+data:
+  root: data/tmnf           # episodes/, index.jsonl, refs/, render_report.json
+  resolution: [128, 96]     # [W, H] of stored frames and of the model input
+  channels: 3               # 1 = grayscale (luma), 3 = RGB
+  frame_hz: 20              # perception rate (frames per second the model sees)
+  control_hz: 60            # control loop rate; must be a multiple of frame_hz and
+                            # equal to runtime.control_hz (D-003: 50 aligns with 100 Hz physics)
+  history_s: 2.0            # frame history, K = round(history_s * frame_hz) + 1; 0 = single frame
+  chunk_len: 8              # actions per prediction (8 / 60 Hz = 133 ms horizon)
+model:
+  encoder: tiny_cnn         # tiny_cnn | timm:<name> | hf:<repo_id>
+  d_model: 256
+  n_layers: 4
+  n_heads: 4
+  tokens_per_frame: 16
+train:
+  device: auto
+  precision: bf16           # bf16 needs a CUDA GPU with bf16 support (tools/system_report.py)
+  batch_size: 32
+  num_workers: 4            # use 0 on Windows if DataLoader workers cause trouble
+  steps: 20000
+runtime:
+  control_hz: 60            # must equal data.control_hz
+  device: cuda              # live inference device
+  precision: bf16
+eval:
+  maps: []                  # fill with held-out map uids or .Challenge.Gbx paths (test split)
+  seeds: [0, 1, 2]
+  mode: sync                # sync = deterministic, any speed; realtime = true live timing
+  timeout_s: 120
+game:
+  backend: tmnf
+  tmi_host: 127.0.0.1
+  tmi_port: 8477            # TMAgentLink plugin listen port, see docs/setup_windows.md
+  connect_timeout_s: 30
+  game_speed: 1.0           # live play speed (1.0 = real time)
+  render_speed: 10.0        # simulation speed between captured frames while rendering replays
+  steer_mode: binary        # binary (left/right keys, verified API) | analog; decisions D-010
+  steer_threshold: 0.5      # |steer| above this presses a key in binary mode
+  window_size: [640, 480]   # game window; frames are captured/resized to data.resolution
+  camera: cam1
+  map_dir: data/tmnf/maps   # .Challenge.Gbx files (+ index.json {uid: file}), see tools/tmx_download.py

@@ -1,0 +1,43 @@
+# FakeGame configuration: the toy 2D racer that stands in for TMNF (no game needed).
+# Used by tools/fake_pipeline.py (render -> train -> closed-loop eval -> live loop on CPU),
+#   python tools/render_replays.py --config configs/fake.yaml --fake 200
+#   python -m tmagent.train.train_bc --config configs/fake.yaml
+# Small model, small frames, CPU only. Not a quality benchmark.
+name: fake
+data:
+  root: data/fake           # render_replays writes episodes/, index.jsonl, refs/ here
+  resolution: [64, 48]      # [W, H] of the stored frames
+  channels: 3
+  frame_hz: 20
+  control_hz: 60
+  history_s: 0.5            # K = 11 frame steps
+  chunk_len: 8
+model:
+  d_model: 64
+  n_layers: 2
+  n_heads: 4
+  tokens_per_frame: 8
+train:
+  device: cpu
+  precision: fp32
+  batch_size: 16
+  num_workers: 0
+  steps: 2000
+  warmup_steps: 100
+  eval_every: 200
+  ckpt_every: 500
+  log_every: 50
+runtime:
+  control_hz: 60            # must equal data.control_hz
+  device: cpu
+  precision: fp32
+eval:
+  # Held-out maps: with data.split_seed 0 and the default fractions these random tracks
+  # land in the test split, so no training episode was rendered on them.
+  maps: ["fake:random:3", "fake:random:9", "fake:random:21"]
+  seeds: [0, 1]
+  mode: sync
+  timeout_s: 60
+game:
+  backend: fake
+  fake_track: oval          # used when eval.maps is empty

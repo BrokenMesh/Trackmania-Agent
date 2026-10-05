@@ -45,10 +45,14 @@ and rejected. Numbers only from own measurements.
   Phase 0/4 latency measurement shows the transformer is the bottleneck.
 - Status: accepted.
 
-## D-007 (2026-10-05) Episode storage = one compressed .npz per run + index.jsonl
-- Decision: simple per-episode `.npz` files with low-res frames (default
-  128x96 RGB at 20 fps) instead of tar shards. Reconsider if file count or
-  read throughput becomes a problem.
+## D-007 (2026-10-05) Episode storage = one directory per run + index.jsonl
+- First version: one `np.savez_compressed` file per episode. Measured by the
+  data agent: one random window read decompresses the whole episode, ~0.34 s
+  for a 60 s 128x96 RGB episode, so shuffled training would be I/O bound.
+  Rejected.
+- Decision (format 2): per-episode directory with per-frame zlib blobs +
+  offsets (`frames.bin`), small arrays in `arrays.npz`, `meta.json`. A window
+  decodes only its K frames. No tar shards, no extra codec dependency.
 - Status: accepted.
 
 ## D-008 (2026-10-05) GPL tools stay optional

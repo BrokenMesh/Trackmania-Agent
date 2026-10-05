@@ -64,13 +64,18 @@ tests/                 pytest, CPU-only, no game, no network, no downloads
 - Frame `k` is at `round(k * 1000 / frame_hz)` ms and shows the state at that
   time before the action at that time is applied.
 
-## Episode storage
+## Episode storage (format 2, D-007)
 
-- One episode per file: `<data_root>/episodes/<map_uid>/<episode_id>.npz`
-  written with `np.savez_compressed`, keys = `Episode` fields, `meta` stored as
-  a JSON string under key `meta_json`.
-- `<data_root>/index.jsonl`: one line per episode = meta + `path` (relative)
-  + `num_frames`.
+- One directory per episode: `<data_root>/episodes/<map_uid>/<episode_id>/`
+  - `frames.bin`: per-frame `zlib` blobs (uint8 H x W x C), random access via
+    offsets, so a training item decodes only its K frames.
+  - `arrays.npz`: `frame_offsets`, `frame_times_ms`, `actions`,
+    `action_times_ms`, `positions`, `speeds_kmh`, `frame_shape`.
+  - `meta.json`: `EPISODE_META_KEYS` + optional keys (`interfaces.py`).
+- `<data_root>/index.jsonl`: one line per episode = meta + `path` (relative
+  episode dir) + `num_frames`. Last line per path wins.
+- `<data_root>/refs/<map_uid>.npy`: reference polyline (positions of the best
+  finished run) for progress evaluation.
 - Frames: low resolution, default 128x96 RGB (configurable, also grayscale).
 
 ## Training batch format (dataset -> model)

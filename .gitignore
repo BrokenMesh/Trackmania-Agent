@@ -4,7 +4,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
-data/
+/data/
 experiments/*
 !experiments/README.md
 *.npz

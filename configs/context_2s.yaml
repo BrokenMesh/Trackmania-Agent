@@ -1,0 +1,6 @@
+# 2 s of frame history (K = 41) plus action history.
+name: context_2s
+data:
+  history_s: 2.0
+model:
+  use_action_history: true

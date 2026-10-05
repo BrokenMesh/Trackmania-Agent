@@ -5,6 +5,10 @@
 
 Writes live_stats.json and latency.md into --out (default: a new
 experiments/<date>-live-<map>/ run created with tmagent.experiment.create_run).
+
+The policy is loaded first: its checkpoint's data settings (frame_hz, control_hz,
+resolution, channels, history_s, chunk_len) override the config's, so the game captures
+at the resolution the model was trained on.
 """
 
 from __future__ import annotations
@@ -43,6 +47,25 @@ def _run_dir(map_ref: str, cfg: Config) -> Path:
     return Path(create_run(f"live-{stem}", cfg))
 
 
+CKPT_DATA_FIELDS = ("frame_hz", "control_hz", "resolution", "channels", "history_s", "chunk_len")
+
+
+def adopt_checkpoint_data(cfg: Config, policy: Any) -> list[str]:
+    """Replace cfg.data by the checkpoint's data section (if the policy carries one).
+
+    Keeps cfg.runtime / cfg.game, sets runtime.control_hz = data.control_hz. Returns the
+    names of the CKPT_DATA_FIELDS whose values differed.
+    """
+    ckpt_cfg = getattr(policy, "cfg", None)
+    if ckpt_cfg is None:
+        return []
+    diff = [f for f in CKPT_DATA_FIELDS if getattr(cfg.data, f) != getattr(ckpt_cfg.data, f)]
+    cfg.data = dataclasses.replace(ckpt_cfg.data)
+    cfg.runtime.control_hz = cfg.data.control_hz
+    cfg.validate()
+    return diff
+
+
 def _state_dict(game: Any) -> dict[str, Any]:
     try:
         st = game.get_state()
@@ -64,13 +87,23 @@ def main(argv: list[str] | None = None) -> int:
     from tmagent.game import make_game
     from tmagent.model.streaming import load_streaming_policy
 
+    policy = load_streaming_policy(args.ckpt, cfg.runtime.device)  # before make_game
+    if hasattr(policy, "precision"):
+        policy.precision = cfg.runtime.precision  # live precision comes from the CLI config
+    old = dataclasses.replace(cfg.data)
+    diff = adopt_checkpoint_data(cfg, policy)
+    if diff:
+        changes = ", ".join(f"{f}: {getattr(old, f)} -> {getattr(cfg.data, f)}" for f in diff)
+        print(
+            f"WARNING: config.data differs from the checkpoint, using the checkpoint's: {changes}"
+        )
+
     out = Path(args.out) if args.out else _run_dir(args.map, cfg)
     out.mkdir(parents=True, exist_ok=True)
 
     game = make_game(cfg.game, cfg.data)
     wall0 = time.perf_counter()
     try:
-        policy = load_streaming_policy(args.ckpt, cfg.runtime.device)
         game.load_map(args.map)
         game.restart()
         session = LiveSession(game, policy, cfg)

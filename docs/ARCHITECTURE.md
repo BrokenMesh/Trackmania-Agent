@@ -101,26 +101,46 @@ Sequence per step k: `[a_k] [f_k,1 .. f_k,P]` where `a_k` is one token
 embedding the R history actions (MLP over `R*3` values, or a learned
 `[NO_ACTION]` embedding when `hist_valid` is False or history is disabled),
 and `f_k,*` are `P = tokens_per_frame` tokens from the frame encoder
-(patch tokens, adaptive-pooled to P, linear-projected to `d_model`).
-Learned type embeddings (action/frame) and temporal position embeddings
-(index relative to the last step). Causal mask at step granularity: tokens of
-step k attend to all tokens of steps <= k (full attention within a step).
-Readout: the last frame token of each step -> MLP -> `C_len x 3` head.
+(patch tokens, adaptive-pooled to P, linear-projected to `d_model`, learned
+2D patch position embedding). Learned type embeddings (action/frame).
 
-Action head, `head: regression` (default): steer = tanh, loss L1/Huber;
-gas and brake = logits, loss BCE. `head: discrete`: steer in `steer_bins`
-classes (CE), gas/brake BCE. Prediction decodes to the `[C_len, 3]` action
-layout of `interfaces.py`.
+Time is encoded only as a learned **relative step-distance attention bias**
+per head (`rel_bias[n_heads, max_steps]`, index `step_q - step_k`), no
+absolute time embedding (D-011). Block-causal: tokens of step k attend to all
+tokens of steps <= k. Invalid steps (`frame_valid` False, i.e. before episode
+start) hold learned PAD tokens and are key-masked for valid steps (they attend
+only to themselves, so no row is fully masked). Consequence, enforced by
+tests: the output at a valid step depends only on valid steps <= k and their
+relative distances, so dense supervision at every step matches inference.
+Custom pre-norm blocks with `F.scaled_dot_product_attention`. Readout: last
+frame token of each step -> MLP -> head.
+
+Outputs of `TMPolicy.forward` (all `[B, K, chunk_len, ...]`): regression head
+`steer` (pre-tanh), `gas` (logit), `brake` (logit); discrete head
+`steer_logits [..., steer_bins]` instead of `steer`. `decode(outputs,
+binarize=True) -> [B, K, chunk_len, 3]` in the interfaces.py action layout
+(steer tanh / bin expectation, gas/brake sigmoid thresholded at 0.5).
+
+`bc_loss` metrics: `loss`, `loss_steer`, `loss_gas`, `loss_brake`,
+`steer_mae`, `gas_acc`, `brake_acc` and `*_step0` variants (chunk row 0).
+`train_bc` logs them as `train/<name>` (+ `grad_norm`, `lr`, `s_per_step`) and
+`val/<name>`.
 
 Encoders: `tiny_cnn` (fast, tests and first baselines), `timm:<name>`,
 `hf:<repo_id>` (e.g. a SigLIP2 checkpoint). External weights load only when
-configured; tests never download.
+configured; tests never download (timm/hf paths are tested against stubs only).
 
-`StreamingPolicy` (live): keeps a ring buffer of the last K encoded frames
-(each frame encoded once), and the R-action history per step. `observe(frame,
-past_actions)` then `predict() -> [C_len, 3]`. The temporal transformer is
-recomputed over the K steps per call (KV-cache streaming is a Phase 4
-optimization, not required for correctness).
+`StreamingPolicy` (live, eval): keeps the last K encoded frames (each frame
+encoded once) and per-step action histories; `observe(image, past_actions)`
+then `predict() -> [chunk_len, 3]`; runs the temporal transformer over the
+observed steps per call (no KV cache, D-006). `load_streaming_policy(ckpt)`
+attaches the checkpoint Config as `.cfg`; `runtime/live.py` adopts the
+checkpoint's data section (rates, resolution, history, chunk) and warns on
+differences.
+
+Known limit: the attention bias is materialized as `[B, H, L, L]` (~250 MB
+fp32 at K=41, P=16, B=32). Needs a blockwise or step-level formulation before
+8-30 s contexts (Phase 3).
 
 ## Runtime (`tmagent/runtime`)
 
@@ -154,7 +174,7 @@ optimization, not required for correctness).
 ## Experiments
 
 `tmagent.experiment.create_run(name, cfg)` -> `experiments/<YYYY-MM-DD>-<name>/`
-with `config.yaml`, `git.txt` (hash + dirty flag), `seed`, `metrics.jsonl`,
+with `config.yaml`, `git.txt` (hash + dirty flag), `seed.txt`, `metrics.jsonl`,
 `checkpoints/`. Every training/eval CLI uses it.
 
 ## Testing rules

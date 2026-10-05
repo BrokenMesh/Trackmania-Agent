@@ -1,0 +1,6 @@
+# Ablation of context_2s: same frame history, no action history.
+name: context_2s_no_actions
+data:
+  history_s: 2.0
+model:
+  use_action_history: false

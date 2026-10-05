@@ -77,3 +77,13 @@ and rejected. Numbers only from own measurements.
   needed a detected gamepad. `game.steer_mode = binary` (threshold 0.5);
   `analog` available once verified on the user's machine.
 - Status: accepted, revisit in Phase 0.
+
+## D-011 (2026-10-05) Relative step-distance attention bias instead of absolute time embedding
+- Tried: learned absolute time embedding indexed by distance to the window's
+  last step. Problem found in review: with dense supervision (D-005) step k
+  sees itself at distance K-1-k during training but always at distance 0 at
+  inference, so only the last step's loss matched inference.
+- Decision: learned per-head relative bias over step distance, plus key
+  masking of invalid steps. Output at step k is invariant to window start and
+  padding (tested).
+- Status: accepted.

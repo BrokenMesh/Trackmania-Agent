@@ -1,0 +1,6 @@
+# Single-frame baseline (K = 1), no action history.
+name: baseline_single_frame
+data:
+  history_s: 0
+model:
+  use_action_history: false

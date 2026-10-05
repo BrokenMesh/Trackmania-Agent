@@ -1,0 +1,21 @@
+# Tiny CPU config for the fake-data pipeline and quick checks.
+name: smoke
+data:
+  root: data/fake
+  resolution: [64, 48]
+  history_s: 0.5
+model:
+  d_model: 64
+  n_layers: 2
+  n_heads: 4
+  tokens_per_frame: 4
+train:
+  device: cpu
+  precision: fp32
+  batch_size: 4
+  num_workers: 0
+  steps: 20
+  warmup_steps: 2
+  eval_every: 10
+  ckpt_every: 10
+  log_every: 5

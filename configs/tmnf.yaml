@@ -23,6 +23,7 @@ model:
   n_layers: 4
   n_heads: 4
   tokens_per_frame: 16
+  use_action_history: false # D-013: enable only for the Phase 3 ablation (configs/context_2s.yaml)
 train:
   device: auto
   precision: bf16           # bf16 needs a CUDA GPU with bf16 support (tools/system_report.py)

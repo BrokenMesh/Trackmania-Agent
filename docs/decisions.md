@@ -113,3 +113,30 @@ and rejected. Numbers only from own measurements.
   frame_settle_renders, capture_flip_vertical. `tools/tmnf_smoke.py` checks
   step additivity, frame/race-time sync, determinism of replay re-drive.
 - Status: accepted, pending Phase 0 on the user's machine.
+
+## D-013 (2026-10-05) Copycat confirmed on FakeGame; action history off by default
+- Setup (CPU, code proving, not a benchmark): 80 scripted fake runs on 24
+  maps (16 train / 4 val / 4 test), 64x48 RGB, history 0.5 s (K=11), 0.45 M
+  params, batch 32. Closed-loop sync eval, 1 seed, 3 train maps / 3 test maps.
+- Run A, with action history, defaults (dropout 0.3, token dropout 0.1),
+  3000 steps: val steer MAE 0.154, gas acc 0.84, but median progress **0.0**
+  on train and 0.09 on test maps. Diagnosis: on the same standstill frame,
+  P(gas) = 0.15 with history gas=0 and 0.90 with history gas=1; the first
+  prediction (no history) is 0.42 -> no gas -> history says no gas -> the car
+  never starts. With a forced 1 s start it stops again at the next gas-off.
+- Run B, no action history, 1500 steps: gas acc only 0.58, but median
+  progress **0.40** on train maps, 0.09 on test maps (car drives).
+- Run C, history with action_dropout 0.7, token dropout 0.3, gas/brake flip
+  0.1, 1500 steps: median progress **0.0** on both. Stronger dropout alone
+  does not fix it.
+- Decision: `model.use_action_history = false` is the default (fake and tmnf
+  configs; Phase 2 baseline is single frame without history anyway). Action
+  history stays available for the Phase 3 ablation (`configs/context_2s.yaml`).
+- Training loss/accuracy did not reveal the failure; only closed-loop eval
+  did (PLAN rule confirmed). Low train-map progress for B also shows BC at
+  this scale is weak; more data, noise-injected (DAgger-style) runs
+  (Phase 5) and longer training are the expected levers.
+- Ideas not tried yet: feed history delayed by one frame step, predict
+  gas/brake from images only, condition on speed instead of past actions,
+  start-of-race oversampling.
+- Status: accepted for now; revisit in Phase 3 with TMNF data.

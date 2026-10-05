@@ -3,4 +3,4 @@ name: context_2s
 data:
   history_s: 2.0
 model:
-  use_action_history: true
+  use_action_history: true  # Phase 3 ablation; copycat risk, see decisions D-013

@@ -56,7 +56,7 @@ class ModelConfig:
     n_layers: int = 4
     n_heads: int = 4
     dropout: float = 0.1
-    use_action_history: bool = True
+    use_action_history: bool = False  # True only with copycat countermeasures, D-013
     head: str = "regression"  # regression | discrete
     steer_bins: int = 21
 

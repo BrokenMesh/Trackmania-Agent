@@ -17,6 +17,7 @@ model:
   n_layers: 2
   n_heads: 4
   tokens_per_frame: 8
+  use_action_history: false # copycat: drives only without history so far (D-013)
 train:
   device: cpu
   precision: fp32

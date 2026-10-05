@@ -11,9 +11,10 @@ facts about TMNF tooling with sources).
 |------|-------|-------------|
 | Research (TMI, linesight, replay format, TMX, ToS) | in progress | |
 | Shared contracts (`interfaces.py`, `config.py`) | done | |
-| Data pipeline (`tmagent/data`) | todo | |
-| Model + training (`tmagent/model`, `tmagent/train`) | todo | |
-| Runtime + eval + FakeGame | todo | |
+| Data pipeline (`tmagent/data`) | delegated (agent) | |
+| Model + training (`tmagent/model`, `tmagent/train`) | delegated (agent) | |
+| Runtime (`tmagent/runtime`) | delegated (agent) | |
+| FakeGame + eval (`tmagent/game/fake.py`, `tmagent/eval`) | delegated (agent) | |
 | TMNF bridge + render tool | todo | needs research |
 | End-to-end fake pipeline | todo | |
 | Phase 0 on user machine | not started | must run on the user's Windows PC |

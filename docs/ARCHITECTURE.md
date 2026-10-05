@@ -119,7 +119,7 @@ optimization, not required for correctness).
 
 ## Runtime (`tmagent/runtime`)
 
-- `ActionScheduler.publish(chunk, t0_wall, dt)`: chunk of C_len actions whose
+- `ActionScheduler.publish(chunk, t0_wall)` (row spacing 1/control_hz): chunk of C_len actions whose
   first action applies at wall time `t0_wall`. `action_at(t_wall)` returns the
   linearly interpolated steer and sample-and-hold gas/brake from the newest
   chunk covering `t_wall`; past the chunk end it holds the last action for

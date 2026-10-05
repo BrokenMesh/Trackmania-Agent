@@ -92,26 +92,14 @@ pygbx is GPL-3 and optional (decisions D-008): without it you can still re-drive
 input-script text files (`--replay inputs.txt`). Run `python -m pytest -q tests/tmnf`
 to check the install (no game needed).
 
-## 7. Sample config (`configs/tmnf.yaml`, not created by the code, copy it)
+## 7. Config (`configs/tmnf.yaml`)
 
-```yaml
-name: tmnf-phase0
-data:
-  resolution: [128, 96]   # [W, H]
-  channels: 3
-  frame_hz: 20
-game:
-  backend: tmnf
-  tmi_host: 127.0.0.1
-  tmi_port: 8477          # = `set tmagent_port`
-  connect_timeout_s: 60
-  game_speed: 1.0         # realtime play
-  render_speed: 10.0      # sync stepping speed between captured frames
-  steer_mode: binary      # D-010; `analog` needs InputType::Steer verified
-  steer_threshold: 0.5
-  camera: cam1
-  map_dir: C:/Users/YOU/Documents/TrackMania/Tracks/Challenges/tmagent
-```
+`configs/tmnf.yaml` holds the TMNF settings (resolution 128x96 RGB, 20 fps
+frames, 60 Hz control, binary steering, port, `map_dir`, ...). Edit at least
+`game.map_dir` and `game.tmi_port`. First-run knobs for unverified TMI behaviour
+are also there: `game.restart_method` (`rewind` | `give_up`),
+`game.map_path_style`, `game.frame_settle_renders`, `game.capture_flip_vertical`.
+Any value can be overridden per command with `--set key=value`.
 
 Without a config file the smoke tool uses defaults plus `--set` overrides, e.g.
 `--set game.tmi_port=8477 --set game.map_dir=D:/maps`.
@@ -141,7 +129,7 @@ Steps (PASS/FAIL line each, report `experiments/<date>-tmnf-smoke/tmnf_smoke_rep
 | replay re-drive | inputs of a replay reproduce its finish time twice (determinism / desync) | `--tick-offset 1`, check map uid and respawns |
 
 The `MANUAL` line asks you to open `frame_t01000.png`: the in-game timer must read
-0:01.00, the image must be upright (else `client.CAPTURE_FLIP_VERTICAL` /
+0:01.00, the image must be upright (else `game.capture_flip_vertical: true` /
 `--flip-vertical`), HUD and ghosts hidden.
 
 ## 9. Phase 0 checklist (docs/PLAN.md) and the tools
@@ -173,6 +161,6 @@ to the Wine process through `127.0.0.1`.
   `--map-path-style absolute` or relative; the new race must reach race time 0.
 - `restart returned race time 10 ms, expected 0`: TMI did not call `OnRunStep` at race
   time 0, the saved start state is one tick late. Report it (PROTOCOL.md "LOAD_MAP").
-- Frames upside down: set `CAPTURE_FLIP_VERTICAL = True` in `tmagent/game/tmnf/client.py`.
+- Frames upside down: `--set game.capture_flip_vertical=true` (or in `configs/tmnf.yaml`).
 - A crashed Python client never leaves the game frozen: the plugin resets to speed 1.0
   when the connection drops, and a new client replaces the old connection.

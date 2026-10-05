@@ -50,3 +50,8 @@ game:
   window_size: [640, 480]   # game window; frames are captured/resized to data.resolution
   camera: cam1
   map_dir: data/tmnf/maps   # .Challenge.Gbx files (+ index.json {uid: file}), see tools/tmx_download.py
+  # First-run knobs for TMI behaviour that is UNVERIFIED (tmagent/game/tmnf/PROTOCOL.md):
+  restart_method: rewind    # rewind (to saved t=0 state) | give_up
+  map_path_style: auto      # how the `map` command argument is written (auto | absolute | relative)
+  frame_settle_renders: 1   # Render() calls to wait before a screenshot (raise if frames lag)
+  capture_flip_vertical: false  # true if saved frames are upside down

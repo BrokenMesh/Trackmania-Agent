@@ -35,7 +35,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--out", default=None, help="output dir (default: experiments/<date>-live-<map>)"
     )
     p.add_argument(
-        "--set", action="append", default=[], metavar="KEY=VALUE", help="config override"
+        "--set", nargs="+", action="extend", default=[], metavar="KEY=VALUE", help="config override"
     )
     return p.parse_args(argv)
 

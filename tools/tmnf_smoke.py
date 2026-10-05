@@ -376,7 +376,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--set",
-        action="append",
+        nargs="+",
+        action="extend",
         default=[],
         metavar="KEY=VALUE",
         help="config override, repeatable",

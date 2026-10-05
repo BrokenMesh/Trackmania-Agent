@@ -157,3 +157,10 @@ proven Linesight capture approach.
   `right_trigger_float(v)`, `update()`; needs ViGEmBus.
 - dxcam (MIT, Windows): ~240 fps capture claimed; mss (MIT) ~76 fps;
   windows-capture (MIT, WGC API).
+
+## TMI 2.x plugin API used by TMAgentLink.as
+The plugin header (`tmagent/game/tmnf/plugin/TMAgentLink.as`) lists every API
+name with VERIFIED/UNVERIFIED status and sources (Linesight API names only,
+TMNF `as.predefined` declarations in github.com/sashi0034/angel-lsp,
+Archmetrus/TMNf-RLAgent RealtimeDataPublisher.as, XD1674 and Sai-Moen plugins).
+UNVERIFIED items are each isolated in one `Api*` helper.

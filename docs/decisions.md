@@ -96,3 +96,20 @@ and rejected. Numbers only from own measurements.
   masking of invalid steps. Output at step k is invariant to window start and
   padding (tested).
 - Status: accepted.
+
+## D-012 (2026-10-05) TMAgentLink protocol: non-blocking polling, pause by SetSpeed(0)
+- Decision: the plugin never blocks the game thread on socket reads; it polls
+  `Net::Socket.Available` in `OnRunStep` and `Render` (confirmed in three
+  independent TMI 2.x plugins). Sync mode pauses with `SetSpeed(0)` plus a saved
+  state, so `Render()` keeps running and screenshots show the paused tick. STEP
+  targets are race-time based. Every command carries a `req_id`.
+- Rejected: lockstep (plugin waits for a reply every tick) — would stall the
+  game whenever Python hiccups; kept documented as fallback in PROTOCOL.md.
+- Verification so far: Python client vs fake server (115 tests), and the real
+  `.as` compiled with AngelScript 2.35.1 against stubbed TMI API in a
+  simulated engine (opt-in `TMAGENT_PLUGIN_SIM=1`, 23/24 variants; the stale
+  RaceTime-after-rewind variant can lose a tick, xfail). Never run in real TMI.
+- First-run knobs in `GameConfig`: restart_method, map_path_style,
+  frame_settle_renders, capture_flip_vertical. `tools/tmnf_smoke.py` checks
+  step additivity, frame/race-time sync, determinism of replay re-drive.
+- Status: accepted, pending Phase 0 on the user's machine.

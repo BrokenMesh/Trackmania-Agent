@@ -119,6 +119,11 @@ class GameConfig:
     window_size: list[int] = field(default_factory=lambda: [640, 480])
     camera: str = "cam1"
     map_dir: str = "data/tmnf/maps"  # .Challenge.Gbx files, resolved by map_uid or name
+    # first-run knobs for UNVERIFIED TMI behaviour (tmagent/game/tmnf/PROTOCOL.md)
+    restart_method: str = "rewind"  # rewind (to saved start state) | give_up
+    map_path_style: str = "auto"  # how the `map` command argument is written
+    frame_settle_renders: int = 1  # Render() calls to wait before a capture
+    capture_flip_vertical: bool = False  # screenshot row order
     # fake backend
     fake_track: str = "oval"
 

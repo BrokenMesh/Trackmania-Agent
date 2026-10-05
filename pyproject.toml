@@ -18,7 +18,9 @@ dev = ["pytest>=7", "ruff>=0.4"]
 # Real backbones (optional, downloads weights only when configured).
 vision = ["timm>=1.0", "transformers>=4.49"]
 # Windows machine with TMNF + TMInterface.
-game = ["pygbx", "dxcam; sys_platform == 'win32'", "vgamepad; sys_platform == 'win32'", "requests>=2.31"]
+# pygbx (GPL-3, D-008) is installed separately from git, see docs/setup_windows.md:
+#   pip install python-lzo "pygbx @ git+https://github.com/donadigo/pygbx"
+game = ["dxcam; sys_platform == 'win32'", "vgamepad; sys_platform == 'win32'"]
 
 [tool.setuptools.packages.find]
 include = ["tmagent*"]

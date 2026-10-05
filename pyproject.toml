@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tmagent"
+version = "0.1.0"
+description = "Imitation-learning agent for TrackMania Nations Forever with video and action history"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pyyaml>=6",
+    "torch>=2.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4"]
+# Real backbones (optional, downloads weights only when configured).
+vision = ["timm>=1.0", "transformers>=4.49"]
+# Windows machine with TMNF + TMInterface.
+game = ["pygbx", "dxcam; sys_platform == 'win32'", "vgamepad; sys_platform == 'win32'", "requests>=2.31"]
+
+[tool.setuptools.packages.find]
+include = ["tmagent*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -195,6 +195,13 @@ def load_config(path: str | Path | None = None, overrides: list[str] | None = No
     return cfg
 
 
+def config_from_dict(raw: dict[str, Any]) -> Config:
+    """Validated Config from a plain dict (e.g. stored in a checkpoint)."""
+    cfg = _from_dict(Config, raw)
+    cfg.validate()
+    return cfg
+
+
 def config_to_dict(cfg: Config) -> dict[str, Any]:
     return dataclasses.asdict(cfg)
 

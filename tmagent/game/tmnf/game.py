@@ -28,7 +28,7 @@ from tmagent.game.tmnf.client import (
     TMAgentError,
     convert_pixels,
 )
-from tmagent.game.tmnf.window import focus_game_window
+from tmagent.game.tmnf.window import focus_game_window, pid_listening_on
 from tmagent.interfaces import Action, Frame, GameState
 
 MAP_SUFFIX = ".Challenge.Gbx"
@@ -218,6 +218,7 @@ class TMNFGame:
         self.flip_vertical = flip_vertical
         self.map_info: tuple[str, str] | None = None  # (uid, name) reported by the plugin
         self._loaded_path: Path | None = None
+        self._game_pid: int | None = None  # process behind game.tmi_port (several instances)
         self._mode: P.Mode | None = None
         self._last_input: P.InputCmd | None = None
         self._steer_mod = SteerModulator()
@@ -233,6 +234,7 @@ class TMNFGame:
         c.connect()
         self._mode = None
         self._loaded_path = None  # a new connection may be a restarted game
+        self._game_pid = pid_listening_on(self.cfg.tmi_port)
         for cmd in SETUP_COMMANDS:
             c.execute(cmd)
         m = re.fullmatch(r"cam(\d+)", self.cfg.camera.strip())
@@ -299,7 +301,7 @@ class TMNFGame:
         if path == self._loaded_path and self.client.connected and self._mode is not None:
             return
         c = self._ensure(self._mode or P.Mode.SYNC)
-        if self.cfg.focus_window and not focus_game_window():
+        if self.cfg.focus_window and not focus_game_window(pid=self._game_pid):
             warnings.warn(
                 "could not focus the game window: the map intro will not finish and the car "
                 "stays locked; click into the game window",

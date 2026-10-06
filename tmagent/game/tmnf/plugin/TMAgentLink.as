@@ -99,6 +99,7 @@ const string PLUGIN_NAME = "TMAgentLink";
 const string PLUGIN_VERSION = "0.1.0";
 const string HOST = "127.0.0.1";
 const int DEFAULT_PORT = 8477;
+const int PORT_TRIES = 8;              // instances 1..8 listen on DEFAULT_PORT + 0..7
 const uint HEADER_SIZE = 8;
 const uint MAX_COMMAND_PAYLOAD = 1048576;   // 1 MiB: commands are tiny, bigger = corruption
 const uint PAYLOAD_TIMEOUT_MS = 2000;
@@ -821,16 +822,20 @@ void OnGameStateChanged(TM::GameState state)
 void StartListening()
 {
     if (g_listen !is null) return;
-    int port = int(GetVariableDouble("tmagent_port"));
-    if (port <= 0) port = DEFAULT_PORT;
-    @g_listen = Net::Socket();
-    if (!g_listen.Listen(HOST, uint16(port))) {
-        log("TMAgentLink: cannot listen on " + HOST + ":" + port + " (port in use?)", Severity::Error);
-        @g_listen = null;
-        g_listenFailed = true;
-        return;
+    int base = int(GetVariableDouble("tmagent_port"));
+    if (base <= 0) base = DEFAULT_PORT;
+    // A second game instance finds base taken and listens on the next free port.
+    for (int port = base; port < base + PORT_TRIES; port++) {
+        @g_listen = Net::Socket();
+        if (g_listen.Listen(HOST, uint16(port))) {
+            log("TMAgentLink listening on " + HOST + ":" + port);
+            return;
+        }
     }
-    log("TMAgentLink listening on " + HOST + ":" + port);
+    log("TMAgentLink: cannot listen on " + HOST + ":" + base + ".." + (base + PORT_TRIES - 1)
+        + " (ports in use?)", Severity::Error);
+    @g_listen = null;
+    g_listenFailed = true;
 }
 
 // Deferred start: `set tmagent_port` from the launch command line is applied only after

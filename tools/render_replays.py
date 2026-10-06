@@ -242,6 +242,27 @@ class Sink:
         }
 
 
+def parse_shard(text: str) -> tuple[int, int]:
+    """"I/N" -> (I, N) with 0 <= I < N."""
+    m = re.fullmatch(r"(\d+)/(\d+)", text.strip())
+    if not m or not 0 <= int(m.group(1)) < int(m.group(2)):
+        raise ValueError(f"--shard must be I/N with 0 <= I < N, got {text!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def shard_replays(paths: list[Path], index: int, count: int) -> list[Path]:
+    """Replays whose map falls into shard `index` of `count` (stable hash of the map uid
+    from the replay header, so every map is loaded by one instance only)."""
+    from tmagent.game.tmnf.replay import map_uid_from_replay_header
+
+    out = []
+    for p in paths:
+        key = map_uid_from_replay_header(p) or p.name
+        if int(hashlib.sha256(key.encode()).hexdigest(), 16) % count == index:
+            out.append(p)
+    return out
+
+
 def _game_for(cfg: Config, game: SyncGame | None) -> tuple[SyncGame, bool]:
     return (game, False) if game is not None else (make_game(cfg.game, cfg.data), True)  # type: ignore[return-value]
 
@@ -639,6 +660,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--overwrite", action="store_true", help="re-render episodes already stored")
     ap.add_argument("--allow-respawns", action="store_true", help="keep replays with respawns")
     ap.add_argument(
+        "--shard", default=None, metavar="I/N",
+        help="render only the replays of maps in shard I of N (one game instance per shard)",
+    )  # fmt: skip
+    ap.add_argument(
         "--desync-retries", type=int, default=1, help="re-render a desynced run N times first"
     )
     ap.add_argument(
@@ -672,6 +697,9 @@ def main(argv: list[str] | None = None) -> int:
         if not paths:
             print(f"error: no .Replay.Gbx files found for {args.replays!r}")
             return 2
+        if args.shard:
+            paths = shard_replays(paths, *parse_shard(args.shard))
+            print(f"shard {args.shard}: {len(paths)} replays")
         try:
             run = render_tmnf_replays(cfg, paths, allow_respawns=args.allow_respawns, **kw)
         except ImportError as exc:  # pygbx missing

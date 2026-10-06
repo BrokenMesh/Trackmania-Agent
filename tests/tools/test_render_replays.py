@@ -377,3 +377,23 @@ def test_cli_errors(tmp_path: Path, capsys):
     assert "no .Replay.Gbx files" in capsys.readouterr().out
     assert rr.main([*argv, "--tmi-scripts", str(tmp_path)]) == 2
     assert "manifest" in capsys.readouterr().out
+
+
+def test_shard_replays_splits_by_map(tmp_path: Path):
+    from tmagent.game.tmnf.replay import map_uid_from_replay_header
+
+    paths = []
+    for i in range(12):
+        p = tmp_path / f"{i}.Replay.Gbx"
+        uid = f"MAP{i % 4}".encode()
+        p.write_bytes(b'GBX<header type="replay"><challenge uid="' + uid + b'"/></header>')
+        paths.append(p)
+    shards = [rr.shard_replays(paths, k, 3) for k in range(3)]
+    assert sorted(p.name for s in shards for p in s) == sorted(p.name for p in paths)
+    maps_per_shard = [{map_uid_from_replay_header(p) for p in s} for s in shards]
+    for a in range(3):
+        for b in range(a + 1, 3):
+            assert not maps_per_shard[a] & maps_per_shard[b]  # a map never spans two shards
+    assert rr.parse_shard("1/2") == (1, 2)
+    with pytest.raises(ValueError):
+        rr.parse_shard("2/2")

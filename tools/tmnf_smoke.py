@@ -428,7 +428,9 @@ def main(argv: list[str] | None = None) -> int:
     server = None
     if args.fake:
         server = FakePluginServer().start()
-        overrides += [f"game.tmi_port={server.port}", "game.connect_timeout_s=5"]
+        overrides += [
+            f"game.tmi_port={server.port}", "game.connect_timeout_s=5", "game.focus_window=false",
+        ]  # fmt: skip
         dummy = out / "FakeMap.Challenge.Gbx"
         dummy.write_bytes(b"GBX fake map")
         args.map = args.map or str(dummy)

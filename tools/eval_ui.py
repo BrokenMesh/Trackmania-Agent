@@ -1,5 +1,9 @@
 """Local browser UI for closed-loop test drives: pick a checkpoint and maps, run, stop, restart.
 
+Takeover mode (checkbox): an arrow key while the agent drives (or the Take over button) hands
+the car to the player, H (or Hand back) returns it; a stuck / off-track agent waits for the
+player. Player segments are saved as training episodes (source "takeover").
+
     python tools/eval_ui.py --config configs/tmnf.yaml [--port 8600] [--set k=v ...]
 
 Open http://127.0.0.1:8600. One worker thread owns the game connection and the loaded
@@ -24,6 +28,7 @@ from tmagent.config import Config, load_config
 from tmagent.data.split import split_of
 from tmagent.eval.harness import _json_default, run_episode_sync
 from tmagent.eval.progress import ProgressTracker, load_reference
+from tmagent.eval.takeover import PlayerSegment, TakeoverControl, run_takeover_episode, save_segment
 
 REPO = Path(__file__).resolve().parents[1]
 PAGE = Path(__file__).with_name("eval_ui.html")
@@ -70,12 +75,14 @@ def list_maps(cfg: Config) -> list[dict[str, Any]]:
             seen.add(uid)
             title = plain_name(rec.get("TrackName") or uid)
             m = CAMPAIGN_RE.match(title)
-            out.append({
-                "uid": uid,
-                "name": title,
-                "campaign": f"{m.group(1)}{m.group(2)}" if m else None,
-                "split": split_of(uid, d.split_seed, d.val_frac, d.test_frac),
-            })
+            out.append(
+                {
+                    "uid": uid,
+                    "name": title,
+                    "campaign": f"{m.group(1)}{m.group(2)}" if m else None,
+                    "split": split_of(uid, d.split_seed, d.val_frac, d.test_frac),
+                }
+            )
     out.sort(key=lambda m: (m["campaign"] is None, m["campaign"] or "", m["name"].lower()))
     return out
 
@@ -86,6 +93,7 @@ class Job:
     uid: str
     name: str
     seed: int
+    takeover: bool = False
 
 
 @dataclass
@@ -102,6 +110,8 @@ class Runner:
     def __post_init__(self) -> None:
         self.lock = threading.Lock()
         self.wake = threading.Event()
+        self.control = TakeoverControl()
+        self.saved_segments = 0
         self.abort_reason: str | None = None
         self.game = None
         self.policy = None
@@ -111,11 +121,13 @@ class Runner:
                 self.results.append(json.loads(line))
         threading.Thread(target=self._loop, daemon=True).start()
 
-    def submit(self, ckpt: str, maps: list[dict[str, str]], repeats: int) -> None:
+    def submit(
+        self, ckpt: str, maps: list[dict[str, str]], repeats: int, takeover: bool = False
+    ) -> None:
         with self.lock:
             for m in maps:
                 for seed in range(repeats):
-                    self.queue.append(Job(ckpt, m["uid"], m["name"], seed))
+                    self.queue.append(Job(ckpt, m["uid"], m["name"], seed, takeover))
             self.error = None
         self.wake.set()
 
@@ -133,6 +145,10 @@ class Runner:
                 self.queue.appendleft(job)
                 self.abort_reason = "restarted"
 
+    def takeover_request(self, what: str) -> None:
+        """ "take_over", "hand_back" or "retry" for the running takeover episode."""
+        self.control.request(what)
+
     def skip(self) -> None:
         with self.lock:
             if self.current is not None:
@@ -149,10 +165,12 @@ class Runner:
             if self.current is not None:
                 job = self.current["job"]
                 cur = {**{k: v for k, v in self.current.items() if k != "job"}, **job.__dict__}
+                cur["phase"] = self.control.phase if job.takeover else "agent"
             return {
                 "current": cur,
                 "queue": [j.__dict__ for j in self.queue],
                 "error": self.error,
+                "saved_segments": self.saved_segments,
                 "results": self.results[-200:],
             }
 
@@ -165,11 +183,17 @@ class Runner:
                     continue
                 job = self.queue.popleft()
                 self.abort_reason = None
-                self.current = {"job": job, "progress": 0.0, "race_time_ms": 0, "started": time.time()}
+                self.current = {
+                    "job": job,
+                    "progress": 0.0,
+                    "race_time_ms": 0,
+                    "started": time.time(),
+                }
             try:
                 result = self._run(job)
             except Abort as exc:
                 result = {"aborted": str(exc)}
+                self._settle_game()
             except Exception as exc:
                 traceback.print_exc()
                 self._drop_game()
@@ -186,7 +210,26 @@ class Runner:
         policy = self._policy(job.ckpt)
         game = self._game()
         ref = load_reference(job.uid, self.cfg.data.root)
-        return run_episode_sync(game, policy, job.uid, self.cfg, job.seed, ref, on_frame=self._on_frame)
+        if not job.takeover:
+            return run_episode_sync(
+                game, policy, job.uid, self.cfg, job.seed, ref, on_frame=self._on_frame
+            )
+        self.control.pop()
+        return run_takeover_episode(
+            game, policy, job.uid, self.cfg, job.seed, ref, self.control,
+            on_frame=self._on_frame, on_segment=lambda seg: self._save_segment(job, seg),
+        )  # fmt: skip
+
+    def _save_segment(self, job: Job, seg: PlayerSegment) -> None:
+        if save_segment(seg, self.cfg, job.uid, job.name, job.ckpt) is not None:
+            with self.lock:
+                self.saved_segments += 1
+
+    def _settle_game(self) -> None:
+        """After an abort while the player drove: back to sync, so the plugin pauses again."""
+        if self.control.phase != "agent" and self.game is not None:
+            self.game.take_back()
+        self.control.phase = "agent"
 
     def _on_frame(self, tracker: ProgressTracker) -> None:
         with self.lock:
@@ -221,7 +264,12 @@ class Runner:
         self.game = None
 
     def _record(self, job: Job, result: dict[str, Any]) -> None:
-        rec = {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "ckpt": job.ckpt, "name": job.name, **result}
+        rec = {
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "ckpt": job.ckpt,
+            "name": job.name,
+            **result,
+        }
         rec["map"], rec["seed"] = job.uid, job.seed
         self.results.append(rec)
         with open(self.results_path, "a", encoding="utf-8") as f:
@@ -264,13 +312,16 @@ def make_handler(runner: Runner, options: dict[str, Any]):
                 if body.get("ckpt") not in ckpts or not maps:
                     self._json({"error": "pick a model and at least one map"}, 400)
                     return
-                runner.submit(body["ckpt"], maps, max(1, min(int(body.get("repeats", 1)), 10)))
+                repeats = max(1, min(int(body.get("repeats", 1)), 10))
+                runner.submit(body["ckpt"], maps, repeats, bool(body.get("takeover")))
             elif self.path == "/api/stop":
                 runner.stop()
             elif self.path == "/api/restart":
                 runner.restart()
             elif self.path == "/api/skip":
                 runner.skip()
+            elif self.path in ("/api/take_over", "/api/hand_back", "/api/retry"):
+                runner.takeover_request(self.path.rsplit("/", 1)[1])
             elif self.path == "/api/clear":
                 runner.clear_results()
             else:
@@ -286,7 +337,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--config", required=True, help="YAML config (game, data, eval sections)")
     ap.add_argument("--port", type=int, default=8600)
     ap.add_argument("--default-ckpt", default=None, help="checkpoint preselected in the page")
-    ap.add_argument("--set", dest="overrides", nargs="+", action="extend", default=[], metavar="K=V")
+    ap.add_argument(
+        "--set", dest="overrides", nargs="+", action="extend", default=[], metavar="K=V"
+    )
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config, args.overrides)
@@ -297,8 +350,10 @@ def main(argv: list[str] | None = None) -> None:
     }
     runner = Runner(cfg, Path(cfg.data.root) / RESULTS_NAME)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(runner, options))
-    print(f"eval UI on http://127.0.0.1:{args.port} ({len(options['maps'])} maps, "
-          f"{len(options['checkpoints'])} checkpoints)")
+    print(
+        f"eval UI on http://127.0.0.1:{args.port} ({len(options['maps'])} maps, "
+        f"{len(options['checkpoints'])} checkpoints)"
+    )
     server.serve_forever()
 
 

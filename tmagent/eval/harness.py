@@ -19,7 +19,14 @@ import numpy as np
 from tmagent.config import Config, DataConfig, load_config
 from tmagent.eval.progress import ProgressTracker, ReferencePath, load_reference
 from tmagent.game import make_game
-from tmagent.interfaces import PHYSICS_TICK_MS, Action, ChunkPolicy, RealtimeGame, SyncGame
+from tmagent.interfaces import (
+    PHYSICS_TICK_MS,
+    Action,
+    ChunkPolicy,
+    GameState,
+    RealtimeGame,
+    SyncGame,
+)
 
 POLL_HZ = 20.0  # realtime mode: how often the harness reads the game state
 
@@ -72,6 +79,41 @@ def control_row_for_tick(tick_time_ms: int, frame_index: int, control_hz: int, r
     return min(max(bisect_left(times, tick_time_ms + PHYSICS_TICK_MS) - 1, 0), r - 1)
 
 
+def policy_rows(policy: ChunkPolicy, cfg: Config, rng: np.random.Generator) -> np.ndarray:
+    """The policy's next chunk as R executable rows (eval gain, dead zone, noise, clipping)."""
+    ev, r = cfg.eval, cfg.data.actions_per_frame
+    chunk = np.asarray(policy.predict(), dtype=np.float32).reshape(-1, 3)
+    rows = chunk[np.minimum(np.arange(r), len(chunk) - 1)].copy()
+    rows[:, 0] *= ev.steer_gain
+    rows[:, 0] = apply_deadzone(rows[:, 0], ev.steer_deadzone)
+    if ev.action_noise > 0.0:
+        rows[:, 0] += rng.normal(0.0, ev.action_noise, r).astype(np.float32)
+    rows[:, 0] = np.clip(rows[:, 0], -1.0, 1.0)
+    rows[:, 1:] = np.clip(rows[:, 1:], 0.0, 1.0)
+    return rows
+
+
+def drive_frame_period(
+    game: SyncGame,
+    rows: np.ndarray,
+    state: GameState,
+    k: int,
+    cfg: Config,
+    tracker: ProgressTracker,
+) -> GameState:
+    """Step tick by tick until frame k + 1 is due, each tick running its chunk row."""
+    d = cfg.data
+    t_next = round((k + 1) * 1000 / d.frame_hz)
+    while state.race_time_ms < t_next and not tracker.done:
+        j = control_row_for_tick(state.race_time_ms, k, d.control_hz, d.actions_per_frame)
+        prev_t = state.race_time_ms
+        state = game.step(Action.from_array(rows[j]), 1)
+        if state.race_time_ms <= prev_t and not state.finished:
+            raise RuntimeError("game did not advance the race time")
+        tracker.update(state)
+    return state
+
+
 def run_episode_sync(
     game: SyncGame,
     policy: ChunkPolicy,
@@ -91,37 +133,21 @@ def run_episode_sync(
     are handed to the next observe(). `on_frame` sees the tracker before every frame (live
     progress; raising from it aborts the episode).
     """
-    d, ev = cfg.data, cfg.eval
-    r = d.actions_per_frame
     rng = np.random.default_rng(seed)
     policy.reset()
     game.load_map(map_ref)
     state = game.start_race()
-    tracker = ProgressTracker(ref, ev)
+    tracker = ProgressTracker(ref, cfg.eval)
     tracker.update(state)
-    past = np.zeros((r, 3), np.float32)
+    past = np.zeros((cfg.data.actions_per_frame, 3), np.float32)
     k = 0
     while not tracker.done:
         if on_frame is not None:
             on_frame(tracker)
         frame = game.grab_frame()
         policy.observe(frame.image, past)
-        chunk = np.asarray(policy.predict(), dtype=np.float32).reshape(-1, 3)
-        rows = chunk[np.minimum(np.arange(r), len(chunk) - 1)].copy()
-        rows[:, 0] *= ev.steer_gain
-        rows[:, 0] = apply_deadzone(rows[:, 0], ev.steer_deadzone)
-        if ev.action_noise > 0.0:
-            rows[:, 0] += rng.normal(0.0, ev.action_noise, r).astype(np.float32)
-        rows[:, 0] = np.clip(rows[:, 0], -1.0, 1.0)
-        rows[:, 1:] = np.clip(rows[:, 1:], 0.0, 1.0)
-        t_next = round((k + 1) * 1000 / d.frame_hz)
-        while state.race_time_ms < t_next and not tracker.done:
-            j = control_row_for_tick(state.race_time_ms, k, d.control_hz, r)
-            prev_t = state.race_time_ms
-            state = game.step(Action.from_array(rows[j]), 1)
-            if state.race_time_ms <= prev_t and not state.finished:
-                raise RuntimeError("game did not advance the race time")
-            tracker.update(state)
+        rows = policy_rows(policy, cfg, rng)
+        state = drive_frame_period(game, rows, state, k, cfg, tracker)
         past = rows
         k += 1
     return {**_episode_result(map_ref, seed, "sync", tracker, ref), "frames": k}

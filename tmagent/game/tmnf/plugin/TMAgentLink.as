@@ -96,7 +96,7 @@
 
 const int PROTOCOL_VERSION = 1;
 const string PLUGIN_NAME = "TMAgentLink";
-const string PLUGIN_VERSION = "0.1.0";
+const string PLUGIN_VERSION = "0.2.0";
 const string HOST = "127.0.0.1";
 const int DEFAULT_PORT = 8477;
 const int PORT_TRIES = 8;              // instances 1..8 listen on DEFAULT_PORT + 0..7
@@ -124,6 +124,7 @@ const int CMD_GET_STATE = 11;
 const int CMD_CLOSE = 12;
 const int CMD_STREAM_STATE = 13;
 const int CMD_PING = 14;
+const int CMD_SET_PASSTHROUGH = 15;
 
 // plugin -> client
 const int REP_ACK = 101;
@@ -247,6 +248,7 @@ uint64 g_mainMs = 0;
 // session (reset when a client connects / disconnects)
 bool g_syncMode = true;           // true: game paused between commands; false: free-running
 bool g_paused = false;            // we hold the game at SetSpeed(0) in g_pausedState
+bool g_passthrough = false;       // realtime only: no SetInputState, the player's keys drive
 float g_runSpeed = 1.0f;          // speed used while the game runs (SET_SPEED)
 SimulationState@ g_pausedState = null;
 int g_pausedRaceTime = 0;
@@ -292,6 +294,7 @@ void ResetSession()
 {
     g_syncMode = true;
     g_paused = false;
+    g_passthrough = false;
     g_runSpeed = 1.0f;
     @g_pausedState = null;
     g_op = OP_NONE;
@@ -544,6 +547,7 @@ void CmdSetMode(int req)
     g_stateEvery = 0;
     if (mode == 0) {                                   // sync
         g_syncMode = true;
+        g_passthrough = false;                         // the client drives again
         bool recentTicks = g_lastRaceTime >= 0 && Time::Now - g_lastCallbackMs < 500;
         if (!g_paused && recentTicks) {                // pause at the next OnRunStep
             g_op = OP_PAUSE;
@@ -679,6 +683,12 @@ void HandleCommand(int type)
         g_stateEvery = RdI32();
         if (g_syncMode) g_stateEvery = 0;
         ReplyAck(req, "");
+    } else if (type == CMD_SET_PASSTHROUGH) {
+        int on = RdI32();
+        if (g_bad) return;
+        if (on != 0 && g_syncMode) { ReplyError(req, "SET_PASSTHROUGH requires realtime mode"); return; }
+        g_passthrough = on != 0;
+        ReplyAck(req, "");
     } else if (type == CMD_PING) {                     // ACK text = diagnostics for the client
         ReplyAck(req, "guard_rewinds=" + g_guardRewinds + " tick=" + g_tick + " op=" + g_op);
     } else {
@@ -792,7 +802,7 @@ void OnRunStep(SimulationManager@ sm)
     AdvanceOp(sm, rt);
     if (g_client is null || g_paused) return;
 
-    if (rt >= 0) ApplyInput(sm);
+    if (rt >= 0 && !g_passthrough) ApplyInput(sm);
     if (g_stateEvery > 0 && (g_tick % g_stateEvery) == 0) PushState();
 }
 
@@ -848,7 +858,7 @@ void OnListenCommand(int fromTime, int toTime, const string &in commandLine, con
 void OnStatusCommand(int fromTime, int toTime, const string &in commandLine, const array<string> &in args)
 {
     log("TMAgentLink: listening=" + (g_listen !is null) + " client=" + (g_client !is null)
-        + " sync=" + g_syncMode + " paused=" + g_paused + " op=" + g_op + " tick=" + g_tick
+        + " sync=" + g_syncMode + " passthrough=" + g_passthrough + " paused=" + g_paused + " op=" + g_op + " tick=" + g_tick
         + " raceTime=" + g_lastRaceTime + " cp=" + g_cpCount + "/" + g_cpTarget
         + " finished=" + g_finished + " guardRewinds=" + g_guardRewinds);
 }

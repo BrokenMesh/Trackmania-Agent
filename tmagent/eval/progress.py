@@ -97,8 +97,18 @@ class ProgressTracker:
         if not self.done:
             self.done, self.reason = True, reason
 
-    def update(self, state: GameState) -> None:
-        """Account for one state; sets `done` and `reason` when the episode should end."""
+    def revive(self) -> None:
+        """Undo a "stuck" / "offtrack" end so the episode can go on (takeover mode)."""
+        if self.reason in ("stuck", "offtrack"):
+            self.done, self.reason = False, None
+        self._slow_since = self._off_since = None
+
+    def update(self, state: GameState, judge: bool = True) -> None:
+        """Account for one state; sets `done` and `reason` when the episode should end.
+
+        judge=False tracks progress and the finish only (no stuck / offtrack / timeout end),
+        e.g. while a human drives.
+        """
         if self.done:
             return
         t = int(state.race_time_ms)
@@ -114,6 +124,9 @@ class ProgressTracker:
             self.max_s = self.ref.length
             self.finish_time_ms = t
             self.finish("finished")
+            return
+        if not judge:
+            self._slow_since = self._off_since = None
             return
         if self.dist > cfg.offtrack_dist:
             self.offtrack_ms += dt

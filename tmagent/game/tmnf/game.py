@@ -389,6 +389,23 @@ class TMNFGame:
         img = convert_pixels(fm, self.data_cfg.channels, self.flip_vertical)
         return Frame(image=img, race_time_ms=fm.race_time_ms, wall_time=fm.wall_time)
 
+    # ------------------------------------------------------------- takeover
+
+    def hand_to_player(self) -> None:
+        """Let the race run at game_speed with the player's keys driving (plugin 0.2.0+).
+        Frames and states stream as in realtime mode. Focuses the game window so the keys
+        reach it."""
+        c = self._ensure(P.Mode.REALTIME)
+        c.set_passthrough(True)
+        if self.cfg.focus_window:
+            focus_game_window(pid=self._game_pid)
+
+    def take_back(self) -> GameState:
+        """Pause at the next tick (sync mode; this ends the passthrough) and return that state."""
+        c = self._ensure(P.Mode.SYNC)
+        self._steer_mod.reset()
+        return to_game_state(c.get_state())
+
     # ------------------------------------------------------------- realtime
 
     def restart(self) -> None:

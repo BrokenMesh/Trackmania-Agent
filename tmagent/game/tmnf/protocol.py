@@ -43,6 +43,7 @@ class Cmd(IntEnum):
     CLOSE = 12
     STREAM_STATE = 13
     PING = 14
+    SET_PASSTHROUGH = 15
 
 
 class Rep(IntEnum):
@@ -266,6 +267,10 @@ def enc_ping(req_id: int) -> bytes:
     return _cmd(Cmd.PING, req_id)
 
 
+def enc_set_passthrough(req_id: int, on: bool) -> bytes:
+    return _cmd(Cmd.SET_PASSTHROUGH, req_id, _I32.pack(int(on)))
+
+
 def dec_command(msg: Message) -> tuple[Cmd, int, tuple]:
     """Parse a command message into (cmd, req_id, args). Used by the fake plugin."""
     try:
@@ -307,6 +312,8 @@ def _dec_command(msg: Message) -> tuple[Cmd, int, tuple]:
         return cmd, req_id, struct.unpack("<f", body)
     if cmd is Cmd.STREAM_STATE:
         return cmd, req_id, (_I32.unpack(body)[0],)
+    if cmd is Cmd.SET_PASSTHROUGH:
+        return cmd, req_id, (bool(_I32.unpack(body)[0]),)
     return cmd, req_id, ()  # GET_STATE, CLOSE, PING
 
 

@@ -128,3 +128,19 @@ def press_key(scan_code: int, pid: int | None = None) -> bool:
         user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
         time.sleep(0.05)
     return True
+
+
+VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN = 0x25, 0x26, 0x27, 0x28
+VK_H = 0x48
+DRIVE_KEYS = (VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN)  # TMNF default binds: arrows
+
+
+def keys_down(vks: tuple[int, ...]) -> tuple[bool, ...]:
+    """Which of the virtual keys are held right now (GetAsyncKeyState, any window focused).
+    All False off Windows."""
+    if sys.platform != "win32":
+        return tuple(False for _ in vks)
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    return tuple(bool(user32.GetAsyncKeyState(vk) & 0x8000) for vk in vks)

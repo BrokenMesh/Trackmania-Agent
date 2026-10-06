@@ -78,7 +78,9 @@ def test_skip_aborts_and_restart_reruns_the_map(fake_cfg: Config, tmp_path: Path
     runner = make_runner(fake_cfg, tmp_path, GasPolicy(hook))
     runner.submit("ckpt.pt", [{"uid": "fake:oval", "name": "Oval"}], repeats=1)
     st = wait_idle(runner)
-    assert len(st["results"]) == 1 and "aborted" not in st["results"][0]  # the restart is not logged
+    assert (
+        len(st["results"]) == 1 and "aborted" not in st["results"][0]
+    )  # the restart is not logged
 
     skipper = GasPolicy(lambda frames: runner.skip() if frames == 5 else None)
     runner._policy = lambda ckpt: skipper

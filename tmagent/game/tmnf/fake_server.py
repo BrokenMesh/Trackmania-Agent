@@ -164,6 +164,8 @@ class FakePluginServer:
             self.speed = 1.0
             self.paused = False
             self.input = P.InputCmd()
+            self.player_input = P.InputCmd()  # test hook: the "keyboard" while passthrough is on
+            self.passthrough = False
             self.car = _Car()
             self.race_time = 0
             self.cp_count = 0
@@ -201,7 +203,7 @@ class FakePluginServer:
         self.seq += 1
         if self.finished:
             return  # race time freezes at the finish, like TMI
-        self.car.tick(self.input)
+        self.car.tick(self.player_input if self.passthrough else self.input)
         self.race_time += TICK_MS
         while (
             self.cp_count < len(self.checkpoint_xs)
@@ -317,6 +319,7 @@ class FakePluginServer:
             self.paused = self.mode is P.Mode.SYNC and self.in_race
             if self.mode is P.Mode.SYNC:
                 self.frame_stream, self.state_every = None, 0
+                self.passthrough = False
             self._rt_base = None
             send(ok(rid))
         elif cmd is P.Cmd.LOAD_MAP:
@@ -372,6 +375,12 @@ class FakePluginServer:
             send(ok(rid))
         elif cmd is P.Cmd.GET_STATE:
             send(P.enc_state(rid, self._state()))
+        elif cmd is P.Cmd.SET_PASSTHROUGH:
+            if args[0] and self.mode is P.Mode.SYNC:
+                send(err(rid, "SET_PASSTHROUGH requires realtime mode"))
+                return
+            self.passthrough = args[0]
+            send(ok(rid))
         elif cmd is P.Cmd.PING:
             send(ok(rid, f"guard_rewinds=0 tick={self.seq} op=0"))
         elif cmd is P.Cmd.CLOSE:

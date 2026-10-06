@@ -290,6 +290,11 @@ class TMAgentClient:
     def set_mode(self, mode: P.Mode) -> None:
         self._request(lambda rid: P.enc_set_mode(rid, mode))
 
+    def set_passthrough(self, on: bool) -> None:
+        """Realtime only: stop (or resume) setting inputs so the player's keys drive the car.
+        SET_MODE sync turns it off. Plugin 0.2.0+."""
+        self._request(lambda rid: P.enc_set_passthrough(rid, on))
+
     def load_map(self, path: str, timeout: float = 120.0) -> str:
         """Load a map; returns the plugin's "uid<TAB>name" once the race is ready at t=0."""
         _, text = self._request(lambda rid: P.enc_load_map(rid, path), timeout)

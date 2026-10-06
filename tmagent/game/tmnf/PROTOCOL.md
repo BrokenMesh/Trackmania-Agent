@@ -62,6 +62,7 @@ raw bytes.
 | 12 | CLOSE | none | ACK, then the plugin drops the client |
 | 13 | STREAM_STATE | `i32 every_n_ticks` (0 = off) | ACK; PUSH_STATE messages (realtime only) |
 | 14 | PING | none | ACK with diagnostics text `guard_rewinds=<n> tick=<n> op=<n>` |
+| 15 | SET_PASSTHROUGH | `i32 on` | ACK; realtime only (ERROR in sync). While on, the plugin sets no inputs and the player's keyboard drives; SET_MODE sync turns it off. Plugin 0.2.0+ |
 
 Plugin -> client types: ACK 101 (`UTF-8 text`), ERROR 102 (`UTF-8 text`), STATE 103,
 FRAME 104, HELLO 105, PUSH_STATE 106, PUSH_FRAME 107. Commands without a documented

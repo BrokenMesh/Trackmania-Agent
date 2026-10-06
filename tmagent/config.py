@@ -104,6 +104,7 @@ class EvalConfig:
     offtrack_dist: float = 40.0  # world units from reference polyline
     action_noise: float = 0.0  # eval-time steer noise (robustness tests)
     steer_gain: float = 1.0  # sync eval: predicted steer x gain before clipping
+    steer_deadzone: float = 0.0  # sync eval: |steer| below this -> 0, rest rescaled
 
 
 @dataclass

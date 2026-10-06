@@ -51,6 +51,14 @@ def _episode_result(
     return {"map": map_ref, "seed": seed, "mode": mode, **res, "time_ratio": ratio}
 
 
+def apply_deadzone(steer: np.ndarray, deadzone: float) -> np.ndarray:
+    """|steer| below `deadzone` -> 0, the rest rescaled to [0, 1] (keeps sign)."""
+    if deadzone <= 0.0:
+        return steer
+    mag = np.clip((np.abs(steer) - deadzone) / (1.0 - deadzone), 0.0, 1.0)
+    return (np.sign(steer) * mag).astype(steer.dtype)
+
+
 def control_row_for_tick(tick_time_ms: int, frame_index: int, control_hz: int, r: int) -> int:
     """Chunk row (0..r-1) applied during the physics tick that starts at `tick_time_ms`.
 
@@ -97,6 +105,7 @@ def run_episode_sync(
         chunk = np.asarray(policy.predict(), dtype=np.float32).reshape(-1, 3)
         rows = chunk[np.minimum(np.arange(r), len(chunk) - 1)].copy()
         rows[:, 0] *= ev.steer_gain
+        rows[:, 0] = apply_deadzone(rows[:, 0], ev.steer_deadzone)
         if ev.action_noise > 0.0:
             rows[:, 0] += rng.normal(0.0, ev.action_noise, r).astype(np.float32)
         rows[:, 0] = np.clip(rows[:, 0], -1.0, 1.0)

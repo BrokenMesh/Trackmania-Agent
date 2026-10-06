@@ -413,3 +413,11 @@ def test_load_reference_run_time(tmp_path):
     ref = load_reference("A01-Race", tmp_path)
     assert ref.time_ms == 41234 and reference_time_ms("A01-Race", ref) == 41234
     assert load_reference("fake:oval", tmp_path).time_ms is None  # fake maps use the scripted time
+
+
+def test_apply_deadzone_zeroes_small_steer_and_rescales():
+    from tmagent.eval.harness import apply_deadzone
+
+    s = np.array([0.0, 0.1, -0.2, 0.6, -1.0], np.float32)
+    assert np.allclose(apply_deadzone(s, 0.2), [0.0, 0.0, 0.0, 0.5, -1.0])
+    assert apply_deadzone(s, 0.0) is s

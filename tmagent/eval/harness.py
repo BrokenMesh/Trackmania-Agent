@@ -79,6 +79,7 @@ def run_episode_sync(
     cfg: Config,
     seed: int,
     ref: ReferencePath,
+    on_frame: Callable[[ProgressTracker], None] | None = None,
 ) -> dict:
     """One deterministic episode on a SyncGame; resets the policy first.
 
@@ -87,7 +88,8 @@ def run_episode_sync(
     round(i * 1000 / control_hz)); each physics tick runs the row picked by
     `control_row_for_tick`; rows past the chunk hold the last row.
     The actions executed in a frame period (with eval-time steer noise, if configured)
-    are handed to the next observe().
+    are handed to the next observe(). `on_frame` sees the tracker before every frame (live
+    progress; raising from it aborts the episode).
     """
     d, ev = cfg.data, cfg.eval
     r = d.actions_per_frame
@@ -100,6 +102,8 @@ def run_episode_sync(
     past = np.zeros((r, 3), np.float32)
     k = 0
     while not tracker.done:
+        if on_frame is not None:
+            on_frame(tracker)
         frame = game.grab_frame()
         policy.observe(frame.image, past)
         chunk = np.asarray(policy.predict(), dtype=np.float32).reshape(-1, 3)

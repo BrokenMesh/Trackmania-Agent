@@ -21,8 +21,9 @@ facts about TMNF tooling with sources).
 | Phase 0 on user machine | done | `docs/system.md`, `docs/latency.md`, smoke 12/12 PASS |
 | First TMNF dataset | done | 545 episodes, 7.8 h, 64 maps (D-015) |
 | Baseline training (single frame) | done, evaluated | 0/8 finished, median progress 0.126; 3-class steering + PWM: 0.145, A02 0.92 (D-016) |
-| Context model (2 s) | next | discrete3 + pwm, no action history |
-| Dataset batch 2 (30 replays/map) | rendering | 1918 replays downloaded, no respawns |
+| Context model (2 s) | done, evaluated | full data (51.6 h): 0/26 test maps finished, median progress 0.051; first finish on A03 (train map) |
+| Dataset (campaign + community) | done | 3,585 episodes, 51.6 h, 259 maps (214 train / 19 val / 26 test) |
+| Test drive UI | done | `python tools/eval_ui.py --config configs/tmnf.yaml` -> http://127.0.0.1:8600 |
 | Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
 
 Test suite: `python -m pytest -q` -> 463 passed, 4 skipped (CPU, ~60 s).
@@ -38,6 +39,39 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
    -> docs/latency.md; fill the plan's success criteria (TBD values).
 5. Small data run (a few maps, tens of replays) with render_replays + quality,
    then baseline training (single frame, no history), closed-loop eval.
+
+## 2026-10-07 Session 3 (user machine, overnight)
+
+- Community maps: 197 top-awarded TMX race maps (author time 15-60 s), 1,959
+  keyboard replays; rendered with 2-3 game instances (`--shard I/N`, plugin
+  port fallback). 3 instances were no faster than 2 (CPU bound, 4 cores).
+- Render fixes: retry a briefly locked episode rename (Windows PermissionError);
+  a map whose load hangs the game is stored as `bad_map` in render_skips.jsonl
+  and its runs are skipped from then on.
+- Training on the full set (40k steps, ~6.5 h, GPU). Val loss bottomed at ~0.79
+  (step 9-12k), ended at 0.84; train loss 0.56. Episodes are 78 GB on an HDD,
+  which slows data loading (0.55 s/step vs 0.43 s on the small set).
+- Closed-loop eval, 30 maps x 1 seed (26 test maps + 4 train maps of the old
+  8-map set):
+
+  | Model | test26 median / mean progress | old 8 median / mean | finished |
+  |---|---|---|---|
+  | ctx2_full step 40k (51.6 h) | 0.051 / 0.067 | 0.160 / 0.198 | 0/34 |
+  | ctx2 step 20k (7.8 h) | 0.046 / 0.058 | 0.166 / 0.204 | 0/34 |
+  | discrete3 single frame | 0.047 / 0.058 | 0.093 / 0.141 | 0/34 |
+
+  6.6x more data did not move closed-loop progress beyond noise. Offline on val
+  maps the model is good (steer sign accuracy 0.88, corr 0.63, gas 0.96), so
+  the gap is closed-loop: compounding errors / missing recoveries (or a
+  remaining timing mismatch, not yet ruled out).
+- A01-A10 with ctx2_full: A03 finished (25.86 s, first finish); A02 60 %,
+  A04 69 %; A10 shows 100 % while offtrack at 11 s (progress projection is
+  unreliable on acrobatic maps with overlapping path sections).
+- `tools/eval_ui.py`: local browser UI to pick a checkpoint and maps (presets
+  A01-A10, campaign, test split), queue drives, restart / skip / stop;
+  results in `data/tmnf/eval_ui_results.jsonl`.
+- Running 2-3 game instances plus GPU training made the PC stutter: run one
+  heavy job at a time.
 
 ## 2026-10-06 Session 2 (user machine, real game)
 

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TM Agent Test Drives</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #66707c; --line: #e2e5ea;
+  --accent: #2463eb; --accent-text: #ffffff; --ok: #1a7f37; --bad: #c62f2f; --warn: #b26a00;
+  --bar: #e8ecf2; --chip: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --panel: #1a1e24; --text: #e6e9ed; --muted: #949ca7; --line: #2b313a;
+    --accent: #5b8cff; --accent-text: #0b0e12; --ok: #4cc26b; --bad: #ff6b6b; --warn: #f0a940;
+    --bar: #262c35; --chip: #252a32;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+main { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; gap: 16px; padding: 16px 20px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 16px; } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+section + section { margin-top: 16px; }
+h2 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+label.field { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+select, input[type=text], input[type=number] {
+  width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+button {
+  padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  color: var(--text); font: inherit; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .45; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.presets { margin: 8px 0; }
+.presets button { padding: 4px 9px; font-size: 12px; }
+.maplist { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin-top: 6px; }
+.maplist label { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.maplist label:last-child { border-bottom: 0; }
+.maplist .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+.chip.test { color: var(--ok); }
+.chip.val { color: var(--warn); }
+.muted { color: var(--muted); }
+.now .title { font-size: 16px; font-weight: 600; }
+.bar { height: 10px; background: var(--bar); border-radius: 5px; overflow: hidden; margin: 10px 0 6px; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.error { color: var(--bad); margin-top: 8px; white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+td.wrap { white-space: normal; }
+.tablewrap { overflow-x: auto; }
+.fin { color: var(--ok); font-weight: 600; }
+.ab { color: var(--muted); }
+ol.queue { margin: 0; padding-left: 20px; max-height: 160px; overflow: auto; }
+.summary td:first-child { white-space: normal; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TM Agent Test Drives</h1>
+  <p>Pick a model and maps; the agent drives them in the open game (port from the config).</p>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Run</h2>
+      <label class="field" for="ckpt">Model checkpoint</label>
+      <select id="ckpt"></select>
+      <label class="field" for="filter">Maps <span id="selcount" class="muted"></span></label>
+      <input id="filter" type="text" placeholder="Filter by name, e.g. A0 or test">
+      <div class="row presets">
+        <button data-preset="a01-a10">A01–A10</button>
+        <button data-preset="campaign">All campaign</button>
+        <button data-preset="test">Test split</button>
+        <button data-preset="shown">All shown</button>
+        <button data-preset="none">None</button>
+      </div>
+      <div id="maps" class="maplist"></div>
+      <label class="field" for="repeats">Attempts per map</label>
+      <input id="repeats" type="number" min="1" max="10" value="1">
+      <div class="row" style="margin-top:12px">
+        <button id="run" class="primary">Add to queue</button>
+      </div>
+    </section>
+  </div>
+  <div>
+    <section class="now">
+      <h2>Now driving</h2>
+      <div id="now" class="muted">Idle.</div>
+      <div class="bar"><div id="bar"></div></div>
+      <div class="row">
+        <button id="restart" disabled>Restart map</button>
+        <button id="skip" disabled>Skip map</button>
+        <button id="stop" class="danger" disabled>Stop all</button>
+      </div>
+      <div id="error" class="error"></div>
+    </section>
+    <section>
+      <h2>Queue <span id="qcount" class="muted"></span></h2>
+      <ol id="queue" class="queue"></ol>
+    </section>
+    <section>
+      <div class="row" style="justify-content:space-between">
+        <h2>Per model</h2>
+      </div>
+      <div class="tablewrap"><table class="summary" id="summary"></table></div>
+    </section>
+    <section>
+      <div class="row" style="justify-content:space-between">
+        <h2>Results</h2>
+        <button id="clear" class="danger">Clear results</button>
+      </div>
+      <div class="tablewrap"><table id="results"></table></div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let options = { checkpoints: [], maps: [] };
+const selected = new Set();
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function shortCkpt(path) {
+  const parts = path.split("/");
+  return parts[1].replace(/^\d{4}-\d{2}-\d{2}-/, "") + " / " + parts[3].replace(".pt", "");
+}
+function pct(x) { return x == null ? "–" : (100 * x).toFixed(1) + " %"; }
+function secs(ms) { return ms == null ? "–" : (ms / 1000).toFixed(2) + " s"; }
+
+function visibleMaps() {
+  const q = $("filter").value.trim().toLowerCase();
+  if (!q) return options.maps;
+  return options.maps.filter((m) =>
+    m.name.toLowerCase().includes(q) || m.split === q || m.uid.toLowerCase().startsWith(q));
+}
+
+function renderMaps() {
+  const box = $("maps");
+  box.innerHTML = visibleMaps().map((m) => `
+    <label><input type="checkbox" data-uid="${esc(m.uid)}" ${selected.has(m.uid) ? "checked" : ""}>
+      <span class="nm" title="${esc(m.uid)}">${esc(m.name)}</span>
+      <span class="chip ${m.split}">${m.split}</span></label>`).join("");
+  $("selcount").textContent = `(${selected.size} selected)`;
+}
+
+function applyPreset(name) {
+  const pick = {
+    "a01-a10": (m) => m.campaign && m.campaign[0] === "A" && +m.campaign.slice(1) <= 10,
+    campaign: (m) => !!m.campaign,
+    test: (m) => m.split === "test",
+  }[name];
+  if (name === "none") selected.clear();
+  else if (name === "shown") visibleMaps().forEach((m) => selected.add(m.uid));
+  else { selected.clear(); options.maps.filter(pick).forEach((m) => selected.add(m.uid)); }
+  renderMaps();
+}
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json();
+  if (!r.ok) alertBox(j.error || "request failed");
+  return j;
+}
+function alertBox(msg) { $("error").textContent = msg; }
+
+function renderStatus(st) {
+  const cur = st.current;
+  const busy = !!cur;
+  $("restart").disabled = $("skip").disabled = !busy;
+  $("stop").disabled = !busy && st.queue.length === 0;
+  if (cur) {
+    $("now").innerHTML = `<div class="title">${esc(cur.name)}</div>
+      <div class="muted">${esc(shortCkpt(cur.ckpt))} · attempt ${cur.seed + 1}</div>
+      <div>${pct(cur.progress)} of the track · race time ${secs(cur.race_time_ms)}</div>`;
+    $("bar").style.width = (100 * (cur.progress || 0)).toFixed(1) + "%";
+  } else {
+    $("now").textContent = "Idle.";
+    $("bar").style.width = "0";
+  }
+  $("error").textContent = st.error ? "Stopped on error: " + st.error + "\nCheck that the game is open and listening, then add the maps again." : "";
+  $("qcount").textContent = st.queue.length ? `(${st.queue.length})` : "";
+  $("queue").innerHTML = st.queue.map((j) => `<li>${esc(j.name)} <span class="muted">· ${esc(shortCkpt(j.ckpt))}</span></li>`).join("") || '<span class="muted">Empty.</span>';
+  renderResults(st.results);
+}
+
+function renderResults(results) {
+  const done = results.filter((r) => !r.aborted);
+  const byModel = {};
+  done.forEach((r) => (byModel[r.ckpt] ??= []).push(r));
+  const rows = Object.entries(byModel).map(([ck, rs]) => {
+    const prog = rs.map((r) => r.progress).sort((a, b) => a - b);
+    const med = prog[Math.floor((prog.length - 1) / 2)];
+    const fin = rs.filter((r) => r.finished).length;
+    return `<tr><td>${esc(shortCkpt(ck))}</td><td>${rs.length}</td><td>${fin}</td><td>${pct(med)}</td></tr>`;
+  });
+  $("summary").innerHTML = rows.length
+    ? "<tr><th>Model</th><th>Runs</th><th>Finished</th><th>Median progress</th></tr>" + rows.join("")
+    : '<tr><td class="muted">No finished test drives yet.</td></tr>';
+  const last = results.slice().reverse();
+  $("results").innerHTML = last.length ? "<tr><th>Time</th><th>Model</th><th>Map</th><th>Result</th><th>Progress</th><th>Race time</th></tr>" +
+    last.map((r) => {
+      const res = r.aborted ? `<span class="ab">${esc(r.aborted)}</span>` : r.finished ? '<span class="fin">finished</span>' : esc(r.reason);
+      const t = r.finished ? r.finish_time_ms : r.race_time_ms;
+      return `<tr><td>${esc(r.time.slice(11))}</td><td>${esc(shortCkpt(r.ckpt))}</td><td class="wrap">${esc(r.name)}</td>
+        <td>${res}</td><td>${r.aborted ? "–" : pct(r.progress)}</td><td>${r.aborted ? "–" : secs(t)}</td></tr>`;
+    }).join("") : '<tr><td class="muted">Nothing yet.</td></tr>';
+}
+
+async function poll() {
+  try { renderStatus(await (await fetch("/api/status")).json()); }
+  catch (e) { alertBox("The UI server is not reachable."); }
+  setTimeout(poll, 700);
+}
+
+async function init() {
+  options = await (await fetch("/api/options")).json();
+  const groups = {};
+  options.checkpoints.forEach((c) => (groups[c.run] ??= []).push(c));
+  $("ckpt").innerHTML = Object.entries(groups).map(([run, cs]) =>
+    `<optgroup label="${esc(run)}">${cs.map((c) => `<option value="${esc(c.path)}">${esc(c.file.replace(".pt", ""))}</option>`).join("")}</optgroup>`).join("");
+  if (options.default_ckpt) $("ckpt").value = options.default_ckpt;
+  $("maps").addEventListener("change", (e) => {
+    const uid = e.target.dataset.uid;
+    if (!uid) return;
+    e.target.checked ? selected.add(uid) : selected.delete(uid);
+    $("selcount").textContent = `(${selected.size} selected)`;
+  });
+  $("filter").addEventListener("input", renderMaps);
+  document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => applyPreset(b.dataset.preset)));
+  $("run").addEventListener("click", () => {
+    const maps = options.maps.filter((m) => selected.has(m.uid)).map((m) => m.uid);
+    post("/api/run", { ckpt: $("ckpt").value, maps, repeats: +$("repeats").value || 1 });
+  });
+  $("restart").addEventListener("click", () => post("/api/restart"));
+  $("skip").addEventListener("click", () => post("/api/skip"));
+  $("stop").addEventListener("click", () => post("/api/stop"));
+  $("clear").addEventListener("click", () => { if (confirm("Delete all stored test drive results?")) post("/api/clear"); });
+  applyPreset("a01-a10");
+  poll();
+}
+init();
+</script>
+</body>
+</html>

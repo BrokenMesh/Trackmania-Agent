@@ -110,17 +110,50 @@ def map_command_path(path: Path, style: str = "auto") -> str:
 # -------------------------------------------------------- action conversion
 
 
+class SteerModulator:
+    """First-order sigma-delta: fractional steer -> key presses whose average equals it.
+
+    A constant steer of 0.4 presses right in 2 of 5 calls; -1, 0 and 1 map to themselves,
+    so replay inputs are driven exactly as in binary mode.
+    """
+
+    def __init__(self) -> None:
+        self.acc = 0.0
+
+    def reset(self) -> None:
+        self.acc = 0.0
+
+    def __call__(self, steer: float) -> int:
+        self.acc += max(-1.0, min(1.0, float(steer)))
+        if self.acc >= 0.5:
+            self.acc -= 1.0
+            return 1
+        if self.acc <= -0.5:
+            self.acc += 1.0
+            return -1
+        return 0
+
+
 def action_to_input(
-    action: Action, steer_mode: str = "binary", steer_threshold: float = 0.5
+    action: Action,
+    steer_mode: str = "binary",
+    steer_threshold: float = 0.5,
+    modulator: SteerModulator | None = None,
 ) -> P.InputCmd:
-    """Action -> plugin input. binary: steer keys by threshold; analog: TMI steer int."""
+    """Action -> plugin input. binary: steer keys by threshold; pwm: keys from `modulator`
+    (one call per control step); analog: TMI steer int."""
     acc, brk = action.gas >= 0.5, action.brake >= 0.5
     if steer_mode == "analog":
         return P.InputCmd(
             accelerate=acc, brake=brk, analog=True, steer=P.steer_to_wire(action.steer)
         )
+    if steer_mode == "pwm":
+        if modulator is None:
+            raise ValueError("steer_mode 'pwm' needs a SteerModulator")
+        direction = modulator(action.steer)
+        return P.InputCmd(left=direction < 0, right=direction > 0, accelerate=acc, brake=brk)
     if steer_mode != "binary":
-        raise ValueError(f"steer_mode must be 'binary' or 'analog', got {steer_mode!r}")
+        raise ValueError(f"steer_mode must be 'binary', 'pwm' or 'analog', got {steer_mode!r}")
     return P.InputCmd(
         left=action.steer < -steer_threshold,
         right=action.steer > steer_threshold,
@@ -187,6 +220,7 @@ class TMNFGame:
         self._loaded_path: Path | None = None
         self._mode: P.Mode | None = None
         self._last_input: P.InputCmd | None = None
+        self._steer_mod = SteerModulator()
         self._frame_cache: tuple[P.FrameMsg, Frame] | None = None
 
     # --------------------------------------------------------- connection
@@ -290,6 +324,7 @@ class TMNFGame:
         """Sync: restart to race time 0 (paused) and return that state."""
         c = self._ensure(P.Mode.SYNC)
         st = c.restart(self.restart_method)
+        self._steer_mod.reset()
         if st.race_time_ms != 0:
             raise TMAgentError(
                 f"restart returned race time {st.race_time_ms} ms, expected 0 (the plugin's saved "
@@ -304,7 +339,8 @@ class TMNFGame:
         if n_ticks < 1:
             raise ValueError(f"n_ticks must be >= 1, got {n_ticks}")
         c = self._ensure(P.Mode.SYNC)
-        inp = action_to_input(action, self.cfg.steer_mode, self.cfg.steer_threshold)
+        g = self.cfg
+        inp = action_to_input(action, g.steer_mode, g.steer_threshold, self._steer_mod)
         return to_game_state(c.step(n_ticks, inp))
 
     def grab_frame(self) -> Frame:
@@ -325,11 +361,13 @@ class TMNFGame:
         st = c.restart(self.restart_method)
         c.reset_pushed(st)  # drop frames/states of the previous run
         self._last_input = P.InputCmd()  # the plugin clears the held input on restart
+        self._steer_mod.reset()
 
     def set_action(self, action: Action) -> None:
         """Realtime: hold `action` from the next tick. Sends only on change, never waits."""
         c = self._ensure(P.Mode.REALTIME) if self._mode is not P.Mode.REALTIME else self.client
-        inp = action_to_input(action, self.cfg.steer_mode, self.cfg.steer_threshold)
+        g = self.cfg
+        inp = action_to_input(action, g.steer_mode, g.steer_threshold, self._steer_mod)
         if inp != self._last_input:
             c.set_input(inp)
             self._last_input = inp

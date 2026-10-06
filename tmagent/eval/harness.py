@@ -96,6 +96,7 @@ def run_episode_sync(
         policy.observe(frame.image, past)
         chunk = np.asarray(policy.predict(), dtype=np.float32).reshape(-1, 3)
         rows = chunk[np.minimum(np.arange(r), len(chunk) - 1)].copy()
+        rows[:, 0] *= ev.steer_gain
         if ev.action_noise > 0.0:
             rows[:, 0] += rng.normal(0.0, ev.action_noise, r).astype(np.float32)
         rows[:, 0] = np.clip(rows[:, 0], -1.0, 1.0)

@@ -453,10 +453,10 @@ def test_read_tracks_file_dedupes(tmp_path: Path):
 def test_keyboard_only_replaces_rejected_replays_within_their_group(env, monkeypatch):
     from tmagent.game.tmnf import replay as R
 
-    def even_ids_only(path: Path) -> bool:
+    def even_ids_only(path: Path, keyboard_only: bool = True, allow_respawns: bool = True) -> bool:
         return int(path.name.split("-")[1].split(".")[0]) % 2 == 0
 
-    monkeypatch.setattr(R, "is_keyboard_replay", even_ids_only)
+    monkeypatch.setattr(R, "accept_replay", even_ids_only)
     tmp_path, clock, mock, run = env
     assert run("tracks", "--max-tracks", "1") == 0
     args = ("replays", "--per-track", "4", "--best", "1", "--worst", "1", "--keyboard-only")

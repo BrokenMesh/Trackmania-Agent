@@ -299,3 +299,26 @@ def test_the_loaded_map_is_not_loaded_again(game, server):
     (Path(game.cfg.map_dir) / "Beta.Challenge.Gbx").write_bytes(b"GBX")
     game.load_map("Beta")
     assert [c.name for c in server.commands].count("LOAD_MAP") == 2
+
+
+def test_steer_modulator_averages_fractional_steer():
+    from tmagent.game.tmnf.game import SteerModulator
+
+    mod = SteerModulator()
+    presses = [mod(0.4) for _ in range(100)]
+    assert presses.count(1) == 40 and presses.count(-1) == 0
+    mod.reset()
+    assert [mod(s) for s in (1.0, 1.0, 0.0, -1.0, -1.0, 0.0)] == [1, 1, 0, -1, -1, 0]
+    mod.reset()
+    assert sum(mod(-0.25) for _ in range(40)) == -10
+
+
+def test_pwm_mode_needs_a_modulator_and_drives_keys():
+    from tmagent.game.tmnf.game import SteerModulator, action_to_input
+
+    with pytest.raises(ValueError):
+        action_to_input(Action(steer=0.3, gas=1.0), "pwm")
+    mod = SteerModulator()
+    inputs = [action_to_input(Action(steer=-0.5, gas=1.0), "pwm", modulator=mod) for _ in range(4)]
+    assert [i.left for i in inputs] == [True, False, True, False]
+    assert all(i.accelerate and not i.right for i in inputs)

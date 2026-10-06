@@ -20,7 +20,9 @@ facts about TMNF tooling with sources).
 | Fake end-to-end learning probe | done | copycat found, history off by default (D-013) |
 | Phase 0 on user machine | done | `docs/system.md`, `docs/latency.md`, smoke 12/12 PASS |
 | First TMNF dataset | done | 545 episodes, 7.8 h, 64 maps (D-015) |
-| Baseline training (single frame) | running | then closed-loop eval on test maps |
+| Baseline training (single frame) | done, evaluated | 0/8 finished, median progress 0.126; 3-class steering + PWM: 0.145, A02 0.92 (D-016) |
+| Context model (2 s) | next | discrete3 + pwm, no action history |
+| Dataset batch 2 (30 replays/map) | rendering | 1918 replays downloaded, no respawns |
 | Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
 
 Test suite: `python -m pytest -q` -> 463 passed, 4 skipped (CPU, ~60 s).

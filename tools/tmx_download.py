@@ -80,6 +80,7 @@ REPLAY_SUFFIX = ".Replay.Gbx"
 DEFAULT_OUT = "data/tmnf/tmx"
 DEFAULT_REPLAYS_DIR = "data/tmnf/replays"
 MAX_RETRY_AFTER_S = 300.0
+STATE_REPLACE_TRIES = 10
 
 
 class TMXError(RuntimeError):
@@ -245,7 +246,14 @@ class State:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(self.data, indent=1), encoding="utf-8")
-        tmp.replace(self.path)
+        for attempt in range(STATE_REPLACE_TRIES):
+            try:
+                tmp.replace(self.path)
+                return
+            except PermissionError:
+                if attempt == STATE_REPLACE_TRIES - 1:
+                    raise
+                time.sleep(0.2 * (attempt + 1))
 
     def fail(self, key: str, message: str) -> None:
         self.data["failed"][key] = message
@@ -607,6 +615,9 @@ def build_parser() -> argparse.ArgumentParser:
         "steer/gas (needs pygbx); rejected ones are replaced by the next candidate",
     )  # fmt: skip
     r.add_argument("--max-tries", type=int, default=100, help="replay candidates per group")
+    r.add_argument(
+        "--no-respawns", action="store_true", help="reject replays with respawns (needs pygbx)"
+    )
     return ap
 
 
@@ -661,8 +672,11 @@ def main(
                     return mixed_groups(items, n, n_best, args.worst, rng)
 
             accept = None
-            if args.keyboard_only:
-                from tmagent.game.tmnf.replay import is_keyboard_replay as accept
+            if args.keyboard_only or args.no_respawns:
+                from tmagent.game.tmnf.replay import accept_replay
+
+                def accept(path: Path) -> bool:
+                    return accept_replay(path, args.keyboard_only, not args.no_respawns)
 
             n = fetch_replays(
                 client,

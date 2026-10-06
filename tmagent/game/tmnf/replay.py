@@ -206,6 +206,24 @@ def map_uid_from_replay_header(path: str | os.PathLike) -> str | None:
     return m.group(1).decode("ascii", "replace") if m else None
 
 
+def accept_replay(
+    path: str | os.PathLike, keyboard_only: bool = True, allow_respawns: bool = True
+) -> bool:
+    """Download filter: digital inputs only (see is_keyboard_replay) and/or no respawns.
+
+    Respawns teleport the car and cannot be re-driven (render_replays skips them).
+    Unreadable replays count as False.
+    """
+    try:
+        events, meta = load_replay(path)
+    except Exception:
+        return False
+    if keyboard_only and any(name in ANALOG_EVENTS for _, name, _ in events):
+        return False
+    respawns = max(int(meta.get("num_respawns") or 0), int(meta.get("respawns") or 0))
+    return allow_respawns or respawns == 0
+
+
 def is_keyboard_replay(path: str | os.PathLike) -> bool:
     """True if the replay has only digital inputs (no analog steer/gas from a pad or wheel).
 

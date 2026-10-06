@@ -178,3 +178,22 @@ and rejected. Numbers only from own measurements.
 - Frames must not contain the author-medal ghost: use a game profile without
   records (the in-game toggle did not hide it).
 - Status: accepted.
+
+## D-016 (2026-10-06) Steering as 3 classes + PWM execution; Huber regression rejected
+- Baseline (tiny_cnn, single frame, regression head, Huber, 20k steps, 469 train
+  episodes): closed loop 0/8 finished, median progress 0.126 (4 test + 4 train maps).
+  Offline on val: predicted |steer| > 0.5 in 0.3 % of frames vs 42 % steering labels,
+  corr(pred, label) 0.05. Cause: keyboard labels are -1/0/1 with 60 % "none"; Huber
+  (L1-like) regresses to the conditional median, which is 0, so the model never steers.
+- Fix: `model.head: discrete`, `model.steer_bins: 3` (cross-entropy over left/none/right,
+  decoded as P(right) - P(left)) and `game.steer_mode: pwm` (sigma-delta: steer 0.4 =
+  right key in 40 % of ticks; -1/0/1 unchanged, so replays drive as before).
+  Offline val after 5k steps: corr 0.50, steer sign accuracy 0.79 (was 0.05 / 0.53).
+- Closed loop, 20k steps, same 8 maps: median progress 0.145, A02 0.92, A05 0.49
+  (train maps); test maps A14 0.34, B10 0.17, D05 0.12, D09 0.11. Still 0 finishes.
+- `eval.steer_gain` 1.5 / 2.0: worse (0.157 / 0.120 median, more off-track) -> keep 1.0.
+- Failure mode seen on A01 (GIF): turn-in too late and too weak at 170 km/h, then the
+  car stays against the wall with full gas (the model never brakes or reverses, brake
+  labels are 3 %). Single frames carry no speed / approach-rate information: next lever
+  is the 2 s context (PLAN Phase 3), then more data (render of ~1270 more replays runs).
+- Status: accepted (discrete3 + pwm is the new default for TMNF experiments).

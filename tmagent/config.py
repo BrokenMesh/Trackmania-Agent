@@ -103,6 +103,7 @@ class EvalConfig:
     stuck_s: float = 3.0
     offtrack_dist: float = 40.0  # world units from reference polyline
     action_noise: float = 0.0  # eval-time steer noise (robustness tests)
+    steer_gain: float = 1.0  # sync eval: predicted steer x gain before clipping
 
 
 @dataclass
@@ -114,7 +115,7 @@ class GameConfig:
     connect_timeout_s: float = 30.0
     game_speed: float = 1.0  # live play speed (1.0 = real time)
     render_speed: float = 10.0  # sim speed between captured frames when rendering replays
-    steer_mode: str = "binary"  # binary (left/right keys, verified API) | analog (InputType::Steer)
+    steer_mode: str = "binary"  # binary (keys by threshold) | pwm (keys, sigma-delta) | analog
     steer_threshold: float = 0.5  # |steer| above this -> key press in binary mode
     window_size: list[int] = field(default_factory=lambda: [640, 480])
     camera: str = "cam1"

@@ -360,3 +360,17 @@ def test_steer_left_wins_while_both_keys_are_held():
     tl = R.replay_to_timeline(R.resolve_steer_overlap(events), {"race_time_ms": 700})
     steer = tl.actions[:, 0]
     assert steer[17] == -1.0 and steer[25] == 1.0 and steer[47] == -1.0 and steer[65] == 0.0
+
+
+def test_accept_replay_filters_analog_and_respawns(monkeypatch):
+    runs = {
+        "kb": ([(0, "accelerate", 1.0)], {"respawns": 0}),
+        "pad": ([(0, "steer", 0.5)], {"respawns": 0}),
+        "kb_resp": ([(0, "accelerate", 1.0)], {"num_respawns": 1, "respawns": 1}),
+    }
+    monkeypatch.setattr(R, "load_replay", lambda p: runs[str(p)])
+    assert R.accept_replay("kb", keyboard_only=True, allow_respawns=False)
+    assert not R.accept_replay("pad", keyboard_only=True)
+    assert R.accept_replay("pad", keyboard_only=False)
+    assert R.accept_replay("kb_resp", keyboard_only=True, allow_respawns=True)
+    assert not R.accept_replay("kb_resp", keyboard_only=True, allow_respawns=False)

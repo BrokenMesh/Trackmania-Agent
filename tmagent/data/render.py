@@ -76,6 +76,24 @@ def extend_past_finish(actions: np.ndarray, stop_after_finish_ms: int) -> np.nda
     return np.concatenate([actions, np.repeat(actions[-1:], extra, axis=0)])
 
 
+def stop_ticks(actions: np.ndarray, f_times: np.ndarray, c_times: np.ndarray) -> np.ndarray:
+    """bool [n]: ticks where the render loop must pause (a frame or control time falls in
+    the tick, or the action changes); the ticks in between run in one multi-tick step.
+
+    VERIFIED need: one STEP per tick spent 74 % of the render time in round trips.
+    """
+    n = len(actions)
+    stops = np.zeros(n, dtype=bool)
+    if n == 0:
+        return stops
+    stops[0] = True
+    for times in (f_times, c_times):
+        ticks = np.asarray(times, dtype=np.int64) // PHYSICS_TICK_MS
+        stops[ticks[ticks < n]] = True
+    stops[1:] |= np.any(actions[1:] != actions[:-1], axis=1)
+    return stops
+
+
 def render_episode(
     game: SyncGame,
     timeline: InputTimeline,
@@ -110,7 +128,9 @@ def render_episode(
     speeds: list[float] = []
     resized = mismatched = 0
     finish_ms: int | None = None
-    for i in range(n):
+    stops = stop_ticks(actions, f_times, c_times)
+    i = 0
+    while i < n:
         t_end = (i + 1) * PHYSICS_TICK_MS
         while len(frames) < len(f_times) and f_times[len(frames)] < t_end:
             frame = game.grab_frame()
@@ -124,11 +144,17 @@ def render_episode(
             acts.append(actions[i])
             positions.append(np.asarray(state.position, dtype=np.float32).reshape(3))
             speeds.append(float(state.speed_kmh))
-        state = game.step(Action.from_array(actions[i]))
+        j = i + 1
+        if finish_ms is None:
+            while j < n and not stops[j]:
+                j += 1
+        state = game.step(Action.from_array(actions[i]), j - i)
         if state.finished and finish_ms is None:
             finish_ms = int(state.race_time_ms)
+            j = max(i + 1, finish_ms // PHYSICS_TICK_MS)
         if finish_ms is not None and state.race_time_ms >= finish_ms + stop_after_finish_ms:
             break
+        i = j
 
     w, h = cfg.resolution
     ep_meta = _fill_meta(

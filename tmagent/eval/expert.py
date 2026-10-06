@@ -99,7 +99,9 @@ class LineExpert:
         aligned = line_dir.any() and abs(_angle(heading, line_dir)) < c.aligned_rad
         out = human
         if not (dist < c.on_line_m and aligned):
-            out[0] = 0.0 if abs(alpha) < c.dead_band_rad else float(np.sign(alpha) * c.right_turn_sign)
+            out[0] = (
+                0.0 if abs(alpha) < c.dead_band_rad else float(np.sign(alpha) * c.right_turn_sign)
+            )
         if speed_kmh > self.v[i] + c.overspeed_kmh:
             out[1] = 0.0
         return out

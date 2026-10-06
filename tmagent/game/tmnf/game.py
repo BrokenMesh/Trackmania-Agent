@@ -15,7 +15,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path, PurePath
 
 import numpy as np
@@ -28,13 +31,15 @@ from tmagent.game.tmnf.client import (
     TMAgentError,
     convert_pixels,
 )
-from tmagent.game.tmnf.window import focus_game_window, pid_listening_on
+from tmagent.game.tmnf.window import SCAN_ENTER, focus_game_window, pid_listening_on, press_key
 from tmagent.interfaces import Action, Frame, GameState
 
 MAP_SUFFIX = ".Challenge.Gbx"
 STREAM_FPS_FACTOR = 2  # realtime frame push rate = factor * data.frame_hz (less staleness)
 STATE_PUSH_EVERY_TICKS = 1  # realtime STATE push period in physics ticks
 FRAME_SETTLE_RENDERS = 1  # Render() calls the plugin waits before a capture (UNVERIFIED need)
+INTRO_CONFIRM_AFTER_S = 8.0  # a map load still waiting this long gets Enter presses ...
+INTRO_CONFIRM_EVERY_S = 4.0  # ... at this interval until the race starts
 
 # TMI console variables applied once after connecting. Names are from the Linesight
 # bridge for TMI 2.1.x (VERIFIED there); an unknown name only prints a console error.
@@ -175,6 +180,34 @@ def to_game_state(st: P.StateMsg) -> GameState:
     )
 
 
+@contextmanager
+def confirm_intro(pid: int | None, enabled: bool = True) -> Iterator[None]:
+    """Press Enter in the game window while the body (a map load) takes long.
+
+    VERIFIED need: community maps can have an intro that waits on "Press enter please !";
+    the race never starts and LOAD_MAP times out. Enter is harmless once the race runs.
+    """
+    if not enabled:
+        yield
+        return
+    stop = threading.Event()
+
+    def run() -> None:
+        if stop.wait(INTRO_CONFIRM_AFTER_S):
+            return
+        while not stop.is_set():
+            press_key(SCAN_ENTER, pid)
+            stop.wait(INTRO_CONFIRM_EVERY_S)
+
+    worker = threading.Thread(target=run, name="confirm-intro", daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join(timeout=1.0)
+
+
 # ------------------------------------------------------------------- game
 
 
@@ -308,7 +341,8 @@ class TMNFGame:
                 stacklevel=2,
             )
         self._loaded_path = None
-        text = c.load_map(map_command_path(path, self.map_path_style))
+        with confirm_intro(self._game_pid, enabled=self.cfg.focus_window):
+            text = c.load_map(map_command_path(path, self.map_path_style))
         uid, _, name = text.partition("\t")
         self.map_info = (uid, name)
         self._loaded_path = path

@@ -91,3 +91,40 @@ def focus_game_window(title_prefix: str = WINDOW_TITLE_PREFIX, pid: int | None =
     user32.SetForegroundWindow(hwnd)
     time.sleep(FOCUS_SETTLE_S)
     return user32.GetForegroundWindow() == hwnd
+
+
+SCAN_ENTER = 0x1C
+
+
+def press_key(scan_code: int, pid: int | None = None) -> bool:
+    """Focus the game window (of `pid`, if given) and send one key press by scan code.
+
+    The game reads the keyboard via DirectInput, so a posted window message is not
+    enough; SendInput needs the window in the foreground.
+    """
+    if sys.platform != "win32" or not focus_game_window(pid=pid):
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD), ("wScan", wintypes.WORD), ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t),
+        ]  # fmt: skip
+
+    class INPUT(ctypes.Structure):
+        class _U(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT), ("pad", ctypes.c_byte * 32)]
+
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _U)]
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    keyeventf_scancode, keyeventf_keyup, input_keyboard = 0x0008, 0x0002, 1
+    for flags in (keyeventf_scancode, keyeventf_scancode | keyeventf_keyup):
+        inp = INPUT(type=input_keyboard)
+        inp.ki = KEYBDINPUT(0, scan_code, flags, 0, 0)
+        user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        time.sleep(0.05)
+    return True

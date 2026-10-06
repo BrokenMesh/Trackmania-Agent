@@ -322,3 +322,24 @@ def test_pwm_mode_needs_a_modulator_and_drives_keys():
     inputs = [action_to_input(Action(steer=-0.5, gas=1.0), "pwm", modulator=mod) for _ in range(4)]
     assert [i.left for i in inputs] == [True, False, True, False]
     assert all(i.accelerate and not i.right for i in inputs)
+
+
+def test_confirm_intro_presses_enter_only_while_a_load_takes_long(monkeypatch):
+    from tmagent.game.tmnf import game as G
+
+    presses: list[int | None] = []
+    monkeypatch.setattr(G, "press_key", lambda scan, pid: presses.append(pid) or True)
+    monkeypatch.setattr(G, "INTRO_CONFIRM_AFTER_S", 0.05)
+    monkeypatch.setattr(G, "INTRO_CONFIRM_EVERY_S", 0.02)
+    with G.confirm_intro(42):
+        time.sleep(0.01)
+    assert presses == []  # a fast load is never disturbed
+    with G.confirm_intro(42):
+        time.sleep(0.15)
+    assert len(presses) >= 2 and set(presses) == {42}
+    n = len(presses)
+    time.sleep(0.1)
+    assert len(presses) == n  # stops with the load
+    with G.confirm_intro(42, enabled=False):
+        time.sleep(0.1)
+    assert len(presses) == n

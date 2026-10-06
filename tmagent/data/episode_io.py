@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import time
 import warnings
 import zlib
 from collections import OrderedDict
@@ -80,6 +81,22 @@ def _write_dir(d: Path, ep: Episode) -> None:
     (d / "meta.json").write_text(json.dumps(meta, default=_json_default))
 
 
+RENAME_TRIES = 10
+
+
+def _rename(src: Path, dst: Path) -> None:
+    """VERIFIED need (Windows): a fresh episode directory can be briefly locked (scanner or
+    indexer), and os.rename then fails with PermissionError although a retry succeeds."""
+    for attempt in range(RENAME_TRIES):
+        try:
+            os.rename(src, dst)
+            return
+        except PermissionError:
+            if attempt == RENAME_TRIES - 1:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+
+
 def save_episode(ep: Episode, root: str | Path) -> Path:
     """Write the episode directory atomically (tmp dir + rename); return its path."""
     path = episode_path(root, ep.meta["map_uid"], ep.meta["episode_id"])
@@ -92,12 +109,12 @@ def save_episode(ep: Episode, root: str | Path) -> Path:
     try:
         _write_dir(tmp, ep)
         if path.exists():  # overwrite: park the old directory, restore it on failure
-            os.rename(path, old)
+            _rename(path, old)
             moved = True
-        os.rename(tmp, path)
+        _rename(tmp, path)
     except BaseException:
         if moved:
-            os.rename(old, path)
+            _rename(old, path)
         raise
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

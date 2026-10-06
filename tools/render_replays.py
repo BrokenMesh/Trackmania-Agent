@@ -42,6 +42,7 @@ from tmagent.data.timeline import resample_loss
 from tmagent.experiment import git_info
 from tmagent.game import make_game
 from tmagent.game.fake import scripted_driver
+from tmagent.game.tmnf.client import TMAgentTimeout
 from tmagent.interfaces import InputTimeline, SyncGame
 
 SKIPS_NAME = "render_skips.jsonl"
@@ -131,21 +132,33 @@ class Sink:
     def __post_init__(self) -> None:
         self.root = Path(self.cfg.data.root)
         self.known = {e["episode_id"] for e in read_index(self.root) if "episode_id" in e}
-        self.rejected = self._read_rejected()
+        self.rejected, self.bad_maps = self._read_rejected()
         self.t0 = time.perf_counter()
 
-    def _read_rejected(self) -> dict[str, str]:
+    def _read_rejected(self) -> tuple[dict[str, str], set[str]]:
+        """(rejected episode ids -> reason, map refs that hung the game)."""
         path = self.root / SKIPS_NAME
         if self.overwrite or not path.exists():
-            return {}
-        out = {}
+            return {}, set()
+        out, maps = {}, set()
         for line in path.read_text().splitlines():
             try:
                 rec = json.loads(line)
-                out[rec["episode_id"]] = rec["reason"]
+                if "bad_map" in rec:
+                    maps.add(rec["bad_map"])
+                else:
+                    out[rec["episode_id"]] = rec["reason"]
             except (ValueError, KeyError, TypeError):
                 continue
-        return out
+        return out, maps
+
+    def mark_bad_map(self, map_ref: str, reason: str) -> None:
+        """VERIFIED need (TMNF): some community maps never finish loading (black screen); the
+        game stays hung, so every later run of that map would cost a timeout and a restart."""
+        self.bad_maps.add(map_ref)
+        self.root.mkdir(parents=True, exist_ok=True)
+        with open(self.root / SKIPS_NAME, "a") as f:
+            f.write(json.dumps({"bad_map": map_ref, "reason": reason}) + "\n")
 
     def is_done(self, episode_id: str) -> bool:
         """Already stored (or rejected earlier) and not to be re-rendered; counts as resumed."""
@@ -171,6 +184,9 @@ class Sink:
         cfg, eid = self.cfg, job.episode_id
         if self.is_done(eid):
             return False
+        if job.map_ref in self.bad_maps:
+            self.skip(eid, f"bad_map: {job.map_ref} hung the game before")
+            return False
         meta = {
             **job.meta,
             "episode_id": eid,
@@ -185,6 +201,8 @@ class Sink:
         except Exception as exc:
             self.errors += 1
             self.skip(eid, f"render_error: {type(exc).__name__}: {exc}")
+            if isinstance(exc, TMAgentTimeout):
+                self.mark_bad_map(job.map_ref, f"{type(exc).__name__}: {exc}")
             if self.errors >= MAX_CONSECUTIVE_ERRORS:
                 raise RuntimeError(f"{self.errors} render errors in a row, giving up") from exc
             return False

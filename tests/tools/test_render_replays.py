@@ -397,3 +397,21 @@ def test_shard_replays_splits_by_map(tmp_path: Path):
     assert rr.parse_shard("1/2") == (1, 2)
     with pytest.raises(ValueError):
         rr.parse_shard("2/2")
+
+
+def test_a_timeout_marks_the_map_bad_for_this_and_later_runs(fake_cfg: Config):
+    game = make_game(fake_cfg.game, fake_cfg.data)
+    tl, info = scripted_driver("fake:oval", fake_cfg.data)
+
+    def hang(map_ref):
+        raise rr.TMAgentTimeout("no reply from the plugin within 120 s")
+
+    game.load_map = hang
+    sink = rr.Sink(fake_cfg, game)
+    assert not sink.render(rr.Job("a", tl, "fake:oval", {"source": "a"}, info["race_time_ms"]))
+    assert not sink.render(rr.Job("b", tl, "fake:oval", {"source": "b"}, info["race_time_ms"]))
+    assert sink.errors == 1 and sink.skipped[-1]["reason"].startswith("bad_map")
+    later = rr.Sink(fake_cfg, make_game(fake_cfg.game, fake_cfg.data), require_finished=False)
+    assert later.bad_maps == {"fake:oval"}
+    assert not later.render(rr.Job("c", tl, "fake:oval", {"source": "c"}, info["race_time_ms"]))
+    assert later.render(rr.Job("d", tl, "fake:s_curve", {"source": "d"}, None))

@@ -283,3 +283,19 @@ def test_episode_cache_is_lru_over_readers(tmp_path):
     assert len(cache) == 0
     assert EpisodeCache(size=0).size == 1  # never smaller than one
     assert EpisodeCache().size >= 8  # readers are cheap, the default holds many
+
+
+def test_save_retries_a_briefly_locked_rename(tmp_path, monkeypatch):
+    ep = noisy_episode(20, map_uid="mapA", source="fake:1")
+    real_rename, calls = episode_io.os.rename, []
+
+    def flaky(src, dst):
+        calls.append(src)
+        if len(calls) < 3:
+            raise PermissionError("locked")
+        real_rename(src, dst)
+
+    monkeypatch.setattr(episode_io.os, "rename", flaky)
+    monkeypatch.setattr(episode_io.time, "sleep", lambda s: None)
+    path = save_episode(ep, tmp_path)
+    assert len(calls) == 3 and load_episode(path).meta["episode_id"] == ep.meta["episode_id"]

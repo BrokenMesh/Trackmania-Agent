@@ -131,6 +131,14 @@ class WindowDataset(Dataset):
     def __len__(self) -> int:
         return int(self._starts[-1])
 
+    def window_weights(self, source_weights: dict[str, float]) -> np.ndarray:
+        """Per-window sampling weight from the episode's source kind (meta "source" before ":")."""
+        per_ep = [
+            float(source_weights.get(str(e.get("source", "")).split(":", 1)[0], 1.0))
+            for e in self.entries
+        ]
+        return np.repeat(np.array(per_ep, np.float64), np.diff(self._starts))
+
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state.update(_pid=None, _cache=None, _rng=None)  # never ship cache/RNG to workers

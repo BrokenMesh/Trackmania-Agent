@@ -36,6 +36,9 @@ class DataConfig:
     action_noise_steer: float = 0.05  # std of gaussian noise on history steer
     action_flip_prob: float = 0.02  # P(flip a binary gas/brake history value)
     image_aug: bool = True  # small brightness/contrast/shift jitter
+    # train sampling weight per episode source kind (the part of meta "source" before ":",
+    # e.g. "file", "dagger", "takeover"); kinds not listed weigh 1.0. Empty = uniform shuffle.
+    source_weights: dict[str, float] = field(default_factory=dict)
 
     @property
     def num_steps(self) -> int:
@@ -78,6 +81,7 @@ class TrainConfig:
     ckpt_every: int = 2000
     log_every: int = 50
     steer_loss: str = "huber"  # huber | l1 | mse
+    init_from: str = ""  # checkpoint whose model weights start this run (fresh optimizer)
     loss_weights: dict[str, float] = field(
         default_factory=lambda: {"steer": 1.0, "gas": 0.5, "brake": 0.5}
     )

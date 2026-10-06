@@ -174,3 +174,32 @@ def test_configs_load(name):
         assert cfg.data.history_s == 2 and cfg.model.use_action_history
     else:
         assert cfg.data.history_s == 2 and not cfg.model.use_action_history
+
+
+class WeightedSynth(SynthDataset):
+    """SynthDataset with window_weights(): item i belongs to source "dagger" when i < 2."""
+
+    def __init__(self, cfg: Config, n: int = 12) -> None:
+        super().__init__(cfg, n)
+        self.seen: list[int] = []
+
+    def window_weights(self, source_weights: dict[str, float]) -> np.ndarray:
+        return np.array([source_weights.get("dagger" if i < 2 else "file", 1.0) for i in range(self.n)])
+
+    def __getitem__(self, i: int) -> dict[str, torch.Tensor]:
+        self.seen.append(i)
+        return super().__getitem__(i)
+
+
+def test_source_weights_oversample_and_init_from(tmp_path, capsys):
+    cfg = tiny_cfg(steps=2, eval_every=0, ckpt_every=0, num_workers=0)
+    run = create_run("base", cfg, base=tmp_path)
+    base = train_bc.train(cfg, SynthDataset(cfg), None, run)
+
+    ds = WeightedSynth(cfg, n=50)
+    cfg.data.source_weights = {"dagger": 1000.0}
+    cfg.train.init_from = base["last_ckpt"]
+    cfg.train.steps = 3
+    train_bc.train(cfg, ds, None, create_run("ft", cfg, base=tmp_path))
+    assert "[init] model weights from" in capsys.readouterr().out
+    assert np.mean(np.array(ds.seen) < 2) > 0.8  # the two "dagger" windows dominate

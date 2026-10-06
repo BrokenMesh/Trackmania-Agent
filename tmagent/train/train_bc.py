@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from tmagent.config import Config, TrainConfig, config_to_dict, load_config, save_config
 from tmagent.experiment import create_run, log_metrics
@@ -66,15 +66,27 @@ def lr_factor(step: int, tcfg: TrainConfig) -> float:
 
 
 def make_loader(
-    ds: Dataset, tcfg: TrainConfig, train: bool, device: torch.device, seed: int
+    ds: Dataset,
+    tcfg: TrainConfig,
+    train: bool,
+    device: torch.device,
+    seed: int,
+    weights: np.ndarray | None = None,
 ) -> DataLoader:
+    """weights (train only): per-item sampling weights, drawn with replacement."""
     gen = torch.Generator()
     gen.manual_seed(seed)
     n, bs = len(ds), tcfg.batch_size  # type: ignore[arg-type]
+    sampler = None
+    if train and weights is not None:
+        sampler = WeightedRandomSampler(
+            torch.as_tensor(weights), n, replacement=True, generator=gen
+        )
     return DataLoader(
         ds,
         batch_size=bs,
-        shuffle=train,
+        shuffle=train and sampler is None,
+        sampler=sampler,
         drop_last=train and n >= bs,
         num_workers=tcfg.num_workers,
         pin_memory=device.type == "cuda",
@@ -198,9 +210,16 @@ def train(
         sched.load_state_dict(ckpt["scheduler"])
         step = int(ckpt["step"])
         print(f"[resume] {resume} at step {step}")
+    elif tcfg.init_from:
+        ckpt = torch.load(tcfg.init_from, map_location=device, weights_only=True)
+        model.load_state_dict(ckpt["model"])
+        print(f"[init] model weights from {tcfg.init_from}")
     start_step = step
 
-    train_loader = make_loader(train_ds, tcfg, True, device, tcfg.seed + start_step)
+    weights = None
+    if cfg.data.source_weights and hasattr(train_ds, "window_weights"):
+        weights = train_ds.window_weights(cfg.data.source_weights)
+    train_loader = make_loader(train_ds, tcfg, True, device, tcfg.seed + start_step, weights)
     has_val = val_ds is not None and len(val_ds) > 0  # type: ignore[arg-type]
     val_loader = make_loader(val_ds, tcfg, False, device, 0) if has_val else None
     batches = _cycle(train_loader)

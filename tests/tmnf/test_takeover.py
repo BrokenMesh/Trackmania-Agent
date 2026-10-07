@@ -10,12 +10,12 @@ import pytest
 
 from tmagent.config import load_config
 from tmagent.data.episode_io import load_episode, read_index
+from tmagent.data.player import keys_to_action
 from tmagent.data.quality import check_episode, split_issues
 from tmagent.eval.progress import ReferencePath
 from tmagent.eval.takeover import (
     PlayerSegment,
     TakeoverControl,
-    keys_to_action,
     run_takeover_episode,
     save_segment,
 )

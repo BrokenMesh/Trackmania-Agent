@@ -96,3 +96,16 @@ def test_stop_clears_the_queue(fake_cfg: Config, tmp_path: Path):
     runner.submit("ckpt.pt", [{"uid": "fake:oval", "name": "Oval"}], repeats=3)
     st = wait_idle(runner)
     assert [r.get("aborted") for r in st["results"]] == ["stopped"]
+
+
+def test_record_jobs_route_restart_and_skip_to_the_recorder(fake_cfg: Config, tmp_path: Path):
+    runner = ui.Runner(fake_cfg, tmp_path / ui.RESULTS_NAME)
+    runner.wake.clear()
+    with runner.lock:
+        runner.current = {"job": ui.Job("", "u", "Map", 0, kind="record", session="s")}
+    runner.restart()
+    assert runner.record_control.pop() == "restart" and not runner.queue
+    runner.skip()
+    assert runner.record_control.pop() == "next" and runner.abort_reason is None
+    st = runner.status()
+    assert st["current"]["kind"] == "record" and st["current"]["phase"] == "ready"

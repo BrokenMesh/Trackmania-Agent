@@ -396,6 +396,7 @@ class TMNFGame:
         Frames and states stream as in realtime mode. Focuses the game window so the keys
         reach it."""
         c = self._ensure(P.Mode.REALTIME)
+        c.reset_pushed()  # states/frames of an earlier realtime phase would look current
         c.set_passthrough(True)
         if self.cfg.focus_window:
             focus_game_window(pid=self._game_pid)

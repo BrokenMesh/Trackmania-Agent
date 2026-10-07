@@ -4,6 +4,10 @@ Takeover mode (checkbox): an arrow key while the agent drives (or the Take over 
 the car to the player, H (or Hand back) returns it; a stuck / off-track agent waits for the
 player. Player segments are saved as training episodes (source "takeover").
 
+Recording mode: the player drives the selected maps; every attempt (finished, restarted with
+the game's restart key or the Restart button, or cut by Next map) is saved as an episode with
+source "player:<session>" and its attempt number.
+
     python tools/eval_ui.py --config configs/tmnf.yaml [--port 8600] [--set k=v ...]
 
 Open http://127.0.0.1:8600. One worker thread owns the game connection and the loaded
@@ -25,10 +29,11 @@ from pathlib import Path
 from typing import Any
 
 from tmagent.config import Config, load_config
+from tmagent.data.player import PlayerSegment, Requests, record_map, store_segment
 from tmagent.data.split import split_of
 from tmagent.eval.harness import _json_default, run_episode_sync
 from tmagent.eval.progress import ProgressTracker, load_reference
-from tmagent.eval.takeover import PlayerSegment, TakeoverControl, run_takeover_episode, save_segment
+from tmagent.eval.takeover import TakeoverControl, run_takeover_episode, save_segment
 
 REPO = Path(__file__).resolve().parents[1]
 PAGE = Path(__file__).with_name("eval_ui.html")
@@ -94,6 +99,8 @@ class Job:
     name: str
     seed: int
     takeover: bool = False
+    kind: str = "agent"  # agent | record
+    session: str = ""
 
 
 @dataclass
@@ -111,6 +118,7 @@ class Runner:
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.control = TakeoverControl()
+        self.record_control = Requests("ready")
         self.saved_segments = 0
         self.abort_reason: str | None = None
         self.game = None
@@ -131,6 +139,18 @@ class Runner:
             self.error = None
         self.wake.set()
 
+    def submit_record(self, maps: list[dict[str, str]]) -> None:
+        """Queue a recording session: the player drives each map, attempt after attempt."""
+        session = time.strftime("%Y%m%d-%H%M%S")
+        with self.lock:
+            for m in maps:
+                self.queue.append(Job("", m["uid"], m["name"], 0, kind="record", session=session))
+            self.error = None
+        self.wake.set()
+
+    def _recording(self) -> bool:
+        return self.current is not None and self.current["job"].kind == "record"
+
     def stop(self) -> None:
         """Clear the queue and abort the running episode."""
         with self.lock:
@@ -138,9 +158,11 @@ class Runner:
             self.abort_reason = "stopped"
 
     def restart(self) -> None:
-        """Abort the running episode and run it again from the start."""
+        """Abort the running episode and run it again from the start (recording: new attempt)."""
         with self.lock:
-            if self.current is not None:
+            if self._recording():
+                self.record_control.request("restart")
+            elif self.current is not None:
                 job = self.current["job"]
                 self.queue.appendleft(job)
                 self.abort_reason = "restarted"
@@ -151,7 +173,9 @@ class Runner:
 
     def skip(self) -> None:
         with self.lock:
-            if self.current is not None:
+            if self._recording():
+                self.record_control.request("next")
+            elif self.current is not None:
                 self.abort_reason = "skipped"
 
     def clear_results(self) -> None:
@@ -165,7 +189,10 @@ class Runner:
             if self.current is not None:
                 job = self.current["job"]
                 cur = {**{k: v for k, v in self.current.items() if k != "job"}, **job.__dict__}
-                cur["phase"] = self.control.phase if job.takeover else "agent"
+                if job.kind == "record":
+                    cur["phase"] = self.record_control.phase
+                else:
+                    cur["phase"] = self.control.phase if job.takeover else "agent"
             return {
                 "current": cur,
                 "queue": [j.__dict__ for j in self.queue],
@@ -207,6 +234,8 @@ class Runner:
                     self._record(job, result)
 
     def _run(self, job: Job) -> dict[str, Any]:
+        if job.kind == "record":
+            return self._record_session_map(job)
         policy = self._policy(job.ckpt)
         game = self._game()
         ref = load_reference(job.uid, self.cfg.data.root)
@@ -225,11 +254,53 @@ class Runner:
             with self.lock:
                 self.saved_segments += 1
 
+    def _record_session_map(self, job: Job) -> dict[str, Any]:
+        game = self._game()
+        self.record_control.pop()
+        stats = {"saved": 0, "finishes": 0, "best_ms": None}
+        with self.lock:
+            self.current.update(attempt=1, saved=0, finishes=0, best_ms=None)
+
+        def on_attempt(seg: PlayerSegment, end: str) -> None:
+            attempt = int(self.current["attempt"]) if self.current else 0
+            meta = {
+                "episode_id": f"{job.uid}-player-{job.session}-{attempt:03d}",
+                "map_uid": job.uid,
+                "map_name": job.name,
+                "source": f"player:{job.session}",
+                "session": job.session,
+                "attempt": attempt,
+                "end": end,
+            }
+            saved = store_segment(seg, self.cfg, meta) is not None
+            with self.lock:
+                stats["saved"] += saved
+                if seg.finished and seg.finish_ms is not None:
+                    stats["finishes"] += 1
+                    best = stats["best_ms"]
+                    stats["best_ms"] = seg.finish_ms if best is None else min(best, seg.finish_ms)
+                if self.current is not None:
+                    self.current.update(saved=stats["saved"], finishes=stats["finishes"])
+                    self.current["best_ms"] = stats["best_ms"]
+
+        attempts = record_map(game, job.uid, self.record_control, on_attempt, self._on_tick)
+        return {"kind": "record", "attempts": attempts, **stats}
+
+    def _on_tick(self, info: dict[str, Any]) -> None:
+        with self.lock:
+            if self.current is not None:
+                self.current["attempt"] = info["attempt"]
+                self.current["race_time_ms"] = info["race_time_ms"]
+            if self.abort_reason is not None:
+                raise Abort(self.abort_reason)
+
     def _settle_game(self) -> None:
         """After an abort while the player drove: back to sync, so the plugin pauses again."""
-        if self.control.phase != "agent" and self.game is not None:
+        driving = self.control.phase != "agent" or self.record_control.phase == "driving"
+        if driving and self.game is not None:
             self.game.take_back()
         self.control.phase = "agent"
+        self.record_control.phase = "ready"
 
     def _on_frame(self, tracker: ProgressTracker) -> None:
         with self.lock:
@@ -270,7 +341,7 @@ class Runner:
             "name": job.name,
             **result,
         }
-        rec["map"], rec["seed"] = job.uid, job.seed
+        rec["map"], rec["seed"], rec["kind"] = job.uid, job.seed, job.kind
         self.results.append(rec)
         with open(self.results_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, default=_json_default) + "\n")
@@ -314,6 +385,13 @@ def make_handler(runner: Runner, options: dict[str, Any]):
                     return
                 repeats = max(1, min(int(body.get("repeats", 1)), 10))
                 runner.submit(body["ckpt"], maps, repeats, bool(body.get("takeover")))
+            elif self.path == "/api/record":
+                known = {m["uid"]: m for m in options["maps"]}
+                maps = [known[u] for u in body.get("maps", []) if u in known]
+                if not maps:
+                    self._json({"error": "pick at least one map"}, 400)
+                    return
+                runner.submit_record(maps)
             elif self.path == "/api/stop":
                 runner.stop()
             elif self.path == "/api/restart":

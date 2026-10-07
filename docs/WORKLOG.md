@@ -40,6 +40,23 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
 5. Small data run (a few maps, tens of replays) with render_replays + quality,
    then baseline training (single frame, no history), closed-loop eval.
 
+## 2026-10-07 Session 4 (overnight, autonomous): DAgger
+
+- Pipeline check (VERIFIED): a human A01 replay re-driven through the eval loop gives the
+  training frames (mean |diff| 0.7/255) and the same predictions (corr 0.992). The
+  closed-loop gap is compounding error, not a bug.
+- Takeover mode built (plugin 0.2.0 SET_PASSTHROUGH, `tmagent/eval/takeover.py`, UI
+  buttons); live test pending a game restart (plugin reload).
+- LineExpert (`tmagent/eval/expert.py`) + DAgger collector (`tools/collect_dagger.py`),
+  weighted source sampling (`data.source_weights`) and `train.init_from`.
+- Round d1: ctx2_full drives, expert labels; 214 train maps, 1.24 h, expert drove 79 %.
+  Fine-tune from ctx2_full, dagger weight 10 (23 % of samples), lr 1e-4.
+- Step 2.5k, 30-map eval: train maps A01 0.05 -> 0.53 (first-corner crash gone),
+  A02 0.46 -> 0.91, A05 0.19 -> 0.49; 26 unseen test maps unchanged (mean 0.067 -> 0.055,
+  noise). DAgger fixes recoveries where it collected; no transfer to new maps yet.
+- Round d2 collection started with the 2.5k checkpoint (DAgger iteration 2).
+- YAML gotcha: `train.lr=1e-4` parses as a string (YAML 1.1); write 0.0001.
+
 ## 2026-10-07 Session 3 (user machine, overnight)
 
 - Community maps: 197 top-awarded TMX race maps (author time 15-60 s), 1,959

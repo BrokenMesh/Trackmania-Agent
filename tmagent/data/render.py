@@ -18,6 +18,7 @@ from tmagent.config import DataConfig
 from tmagent.data.timeline import control_times_ms, frame_times_ms, grid_len
 from tmagent.interfaces import PHYSICS_TICK_MS, Action, Episode, InputTimeline, SyncGame
 
+FINISH_GRACE_MS = 100
 _LUMA = np.array([0.299, 0.587, 0.114], dtype=np.float32)
 
 
@@ -62,6 +63,19 @@ def conform_frame(img: np.ndarray, cfg: DataConfig) -> tuple[np.ndarray, bool]:
     return np.ascontiguousarray(img), resized
 
 
+def extend_past_finish(actions: np.ndarray, stop_after_finish_ms: int) -> np.ndarray:
+    """Hold the last action for stop_after_finish_ms + FINISH_GRACE_MS after the timeline.
+
+    VERIFIED (TMNF): the finish of a run whose last input tick is the finish tick is
+    reported one step later, so a timeline that ends exactly at the replay time never
+    sees its own finish without these extra ticks.
+    """
+    if len(actions) == 0:
+        return actions
+    extra = (stop_after_finish_ms + FINISH_GRACE_MS) // PHYSICS_TICK_MS
+    return np.concatenate([actions, np.repeat(actions[-1:], extra, axis=0)])
+
+
 def render_episode(
     game: SyncGame,
     timeline: InputTimeline,
@@ -80,7 +94,10 @@ def render_episode(
     and frame_time_mismatch (number of frames whose Frame.race_time_ms, when
     >= 0, differs from the tick time 10 * i at grab).
     """
-    n = len(timeline.actions)
+    actions = timeline.actions
+    if expected_time_ms is not None:
+        actions = extend_past_finish(actions, stop_after_finish_ms)
+    n = len(actions)
     total_ms = n * PHYSICS_TICK_MS
     f_times = frame_times_ms(grid_len(total_ms, cfg.frame_hz), cfg.frame_hz)
     c_times = control_times_ms(grid_len(total_ms, cfg.control_hz), cfg.control_hz)
@@ -100,13 +117,14 @@ def render_episode(
             img, was_resized = conform_frame(frame.image, cfg)
             frames.append(img)
             resized += was_resized
-            if frame.race_time_ms >= 0 and frame.race_time_ms != i * PHYSICS_TICK_MS:  # -1: unknown
+            in_race = finish_ms is None  # the race clock may stop after the finish
+            if in_race and frame.race_time_ms >= 0 and frame.race_time_ms != i * PHYSICS_TICK_MS:
                 mismatched += 1
         while len(acts) < len(c_times) and c_times[len(acts)] < t_end:
-            acts.append(timeline.actions[i])
+            acts.append(actions[i])
             positions.append(np.asarray(state.position, dtype=np.float32).reshape(3))
             speeds.append(float(state.speed_kmh))
-        state = game.step(Action.from_array(timeline.actions[i]))
+        state = game.step(Action.from_array(actions[i]))
         if state.finished and finish_ms is None:
             finish_ms = int(state.race_time_ms)
         if finish_ms is not None and state.race_time_ms >= finish_ms + stop_after_finish_ms:

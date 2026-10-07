@@ -39,6 +39,16 @@ ANALOG_STEER_SIGN = 1 if P.STEER_NEGATIVE_IS_LEFT else -1
 GAS_THRESHOLD = 19661 / 65536
 FULL = float(P.STEER_FULL_SCALE)
 
+# VERIFIED (TMUF 2.12 + TMI 2.2.1, A01-Race author replay): an input recorded at
+# replay time T must be set in OnRunStep at race time T - 10 ms. Re-driving with
+# this lead reproduced the finish time exactly (24540 ms); without it the run was
+# one tick late, rounding T down instead of shifting it missed the finish.
+GBX_INPUT_LEAD_MS = 10
+RACE_START_EVENT = "_fake_is_race_running"
+REPLAY_HEADER_UID_RE = re.compile(rb'<challenge\s+uid="([^"]+)"')
+REPLAY_HEADER_BYTES = 4096
+ANALOG_EVENTS = ("steer", "gas")
+
 _DIGITAL = {
     "Accelerate": "accelerate",
     "Brake": "brake",
@@ -147,7 +157,7 @@ def load_replay(path: str | os.PathLike) -> tuple[list[Event], dict[str, Any]]:
     except ImportError as e:
         raise ImportError(PYGBX_HINT) from e
     path = Path(path)
-    gbx = Gbx(str(path))
+    gbx = Gbx(path.read_bytes())  # a path would leave the file open (pygbx never closes it)
     ghost = gbx.get_class_by_id(GbxType.CTN_GHOST)
     if ghost is None:
         raise ValueError(f"{path.name}: no ghost found (is this a .Replay.Gbx with a driven run?)")
@@ -162,8 +172,9 @@ def load_replay(path: str | os.PathLike) -> tuple[list[Event], dict[str, Any]]:
         v = getattr(obj, name, None) if obj is not None else None
         return default if v is None else v
 
+    header_uid = map_uid_from_replay_header(path)
     meta: dict[str, Any] = {
-        "map_uid": str(attr(challenge, "map_uid", "") or attr(ghost, "uid", "")),
+        "map_uid": str(header_uid or attr(challenge, "map_uid", "") or attr(ghost, "uid", "")),
         "map_name": str(attr(challenge, "map_name", "")),
         "map_author": str(attr(challenge, "map_author", "")),
         "player": str(attr(ghost, "login", "")),
@@ -177,7 +188,70 @@ def load_replay(path: str | os.PathLike) -> tuple[list[Event], dict[str, Any]]:
         attr(ghost, "control_entries", []), attr(ghost, "control_names", None), meta
     )
     meta.setdefault("respawns", 0)
-    return events, meta
+    return resolve_steer_overlap(align_gbx_events(events)), meta
+
+
+def map_uid_from_replay_header(path: str | os.PathLike) -> str | None:
+    """Map uid from the replay's XML header (`<challenge uid="..."/>`), None if absent.
+
+    VERIFIED on TMX replays: present even when pygbx cannot read the embedded map; the
+    ghost uid that pygbx offers as the other fallback is not the map uid.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(REPLAY_HEADER_BYTES)
+    except OSError:
+        return None
+    m = REPLAY_HEADER_UID_RE.search(head)
+    return m.group(1).decode("ascii", "replace") if m else None
+
+
+def is_keyboard_replay(path: str | os.PathLike) -> bool:
+    """True if the replay has only digital inputs (no analog steer/gas from a pad or wheel).
+
+    VERIFIED on A01-Race TMX replays: keyboard runs re-drive to the exact finish time with
+    binary steering, analog runs drift off the track. Unreadable replays count as False.
+    """
+    try:
+        events, _ = load_replay(path)
+    except Exception:
+        return False
+    return not any(name in ANALOG_EVENTS for _, name, _ in events)
+
+
+def resolve_steer_overlap(events: list[Event]) -> list[Event]:
+    """While steer_left is held, steer_right has no effect: rewrite steer_right to its effect.
+
+    VERIFIED (TMUF 2.12, three A01-Race keyboard replays with both keys held for 10-60 ms):
+    only "left wins" re-drives them to the exact finish time; "right - left = 0", "last
+    pressed wins", "first pressed wins" and "right wins" desync.
+    """
+    out: list[Event] = []
+    left = right = effective_right = False
+    for t, name, value in sorted(events, key=lambda e: e[0]):
+        if name == "steer_left":
+            left = value > 0.5
+            out.append((t, name, value))
+        elif name == "steer_right":
+            right = value > 0.5
+        else:
+            out.append((t, name, value))
+            continue
+        if (right and not left) != effective_right:
+            effective_right = not effective_right
+            out.append((t, "steer_right", 1.0 if effective_right else 0.0))
+    return out
+
+
+def align_gbx_events(events: list[Event]) -> list[Event]:
+    """Replay event times -> timeline times (row k = input set at race time k * 10 ms).
+
+    Times are measured from the race start event (pygbx reports some replays with an
+    offset, e.g. 65535 ms) and moved GBX_INPUT_LEAD_MS earlier.
+    """
+    start = next((t for t, name, _ in events if name == RACE_START_EVENT), 0)
+    shift = start + GBX_INPUT_LEAD_MS
+    return [(t - shift, name, value) for t, name, value in events]
 
 
 # ------------------------------------------------------------ TMI input script

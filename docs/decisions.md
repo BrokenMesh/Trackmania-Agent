@@ -140,3 +140,41 @@ and rejected. Numbers only from own measurements.
   gas/brake from images only, condition on speed instead of past actions,
   start-of-race oversampling.
 - Status: accepted for now; revisit in Phase 3 with TMNF data.
+
+## D-014 (2026-10-06) Verified TMNF bridge behaviour (first run on the real game)
+- Setup: TrackMania United Forever 2.12 (contains Nations) via TMLoader 1.0.1,
+  TMInterface 2.2.1, RTX 4060, Python 3.13.
+- The map intro only finishes while the game window has focus; without focus the
+  t=0 state is saved with the car locked. `game.focus_window: true` focuses the
+  window before each map load (`tmagent/game/tmnf/window.py`).
+- Maps copied or downloaded after the game started cannot be loaded (`map` says
+  "queued", nothing happens): restart the game after adding maps.
+- Replay input timing: an input at replay time T must be set in OnRunStep at
+  T - 10 ms (`GBX_INPUT_LEAD_MS`); with it the A01 author replay re-drives to
+  exactly 24540 ms. pygbx reports some replays with a 65535 ms offset; times are
+  measured from the race-start event.
+- Left + right held together: left wins (only rule that re-drove 3 A01 replays).
+- The finish is reported one step after the last input tick: replay renders hold
+  the last input for 0.6 s more.
+- The plugin saves the t=0 state once per map load; that state was bad once for a
+  whole map (D11, 10/10 desync); a fresh load fixed it. Render retries a desync
+  once with a map reload. Maps are no longer reloaded between runs (saves the
+  ~12 s intro per run).
+- Status: accepted, measured.
+
+## D-015 (2026-10-06) First TMNF dataset: keyboard-only TMX replays, no respawns
+- Source: TMX tracks 2233-2455 (the 65 Nations campaign maps, author Nadeo, map
+  uids equal to the installed ones). 10 replays per map: 3 fastest, 3 slowest
+  under 2x the best time (AFK runs of up to 16 h exist), 4 random middle.
+- Keyboard only (`tmx_download.py --keyboard-only`): analog pad/wheel replays drift
+  off with binary steering (5/5 failed on A01; 5/5 keyboard runs exact). About 3
+  of 4 TMX runs are analog. B01 has 7 replays (no keyboard run among its 100
+  fastest).
+- Replays with respawns are excluded (a respawn teleports the car; the agent only
+  gets full restarts). Map uid comes from the replay XML header (the pygbx ghost
+  uid fallback was wrong for most TMX replays).
+- Result: 545 episodes, 7.8 h, 64 maps (E05 skipped: about 1 h to render);
+  split train 469 / val 43 / test 33 episodes; 3 runs (0.5 %) still desync.
+- Frames must not contain the author-medal ghost: use a game profile without
+  records (the in-game toggle did not hide it).
+- Status: accepted.

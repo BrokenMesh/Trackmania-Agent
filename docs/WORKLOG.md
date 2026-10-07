@@ -15,10 +15,13 @@ facts about TMNF tooling with sources).
 | Model + training (`tmagent/model`, `tmagent/train`) | done, reviewed | relative step bias (D-011) |
 | Runtime (`tmagent/runtime`) | done, reviewed | 0 % misses with a 100 ms policy |
 | FakeGame + eval (`tmagent/game/fake.py`, `tmagent/eval`) | done, reviewed | |
-| TMNF bridge (`tmagent/game/tmnf`, plugin, smoke tool, setup doc) | done, reviewed, **never run in real TMI** | D-012 |
+| TMNF bridge (`tmagent/game/tmnf`, plugin, smoke tool, setup doc) | done, **verified on the real game** | D-012, D-014 |
 | Tools (render, fake pipeline, system/latency reports, TMX download) | done, reviewed | |
 | Fake end-to-end learning probe | done | copycat found, history off by default (D-013) |
-| Phase 0 on user machine | **next** | follow `docs/setup_windows.md` |
+| Phase 0 on user machine | done | `docs/system.md`, `docs/latency.md`, smoke 12/12 PASS |
+| First TMNF dataset | done | 545 episodes, 7.8 h, 64 maps (D-015) |
+| Baseline training (single frame) | running | then closed-loop eval on test maps |
+| Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
 
 Test suite: `python -m pytest -q` -> 463 passed, 4 skipped (CPU, ~60 s).
 Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
@@ -33,6 +36,22 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
    -> docs/latency.md; fill the plan's success criteria (TBD values).
 5. Small data run (a few maps, tens of replays) with render_replays + quality,
    then baseline training (single frame, no history), closed-loop eval.
+
+## 2026-10-06 Session 2 (user machine, real game)
+
+- Setup done: TMUF 2.12 + TMLoader + TMI 2.2.1, venv (Python 3.13, torch cu124),
+  python-lzo replaced by a local `lzo.py` shim over `lzallright` inside `.venv`
+  (no Windows wheels; recreate it with a new venv).
+- Smoke test 12/12 PASS after four bridge fixes (D-014). Latency: chain p99
+  18-24 ms, budget 133 ms (`docs/latency.md`).
+- Data: TMX downloader extended (best/worst/random groups, time cap,
+  keyboard-only with replacement); 651 replays downloaded, 545 episodes rendered
+  (D-015). `tools/episode_gif.py` turns episodes into GIFs with an input overlay.
+- Rendering runs at ~2.2x real time (two round trips per frame); speed-ups are
+  listed in `docs/PLAN_PHASE2.md` M0.
+- Training speed: ~0.3-0.4 s/step at batch 32 (data loading bound).
+- Next: baseline training -> closed-loop eval (needs the game, focused, plugin
+  listening), then the 2 s context model and fractional steering execution.
 
 ## 2026-10-05 Session 1 (cloud, build only)
 

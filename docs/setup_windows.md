@@ -157,8 +157,17 @@ to the Wine process through `127.0.0.1`.
   enabled, or port mismatch (`set tmagent_port` vs `game.tmi_port`).
 - `ProtocolMismatch`: the plugin file in `Documents\TMInterface\Plugins` is older/newer
   than this checkout; copy it again and restart the game.
-- `load map` timeout (default 120 s): see the `map` line in the TMInterface console; try
-  `--map-path-style absolute` or relative; the new race must reach race time 0.
+- `load map` timeout (default 120 s): see the `map` line in the TMInterface console. If it
+  says "The map was successfully queued" but the game stays in the menu, the map file was
+  added after the game started: **restart the game after copying or downloading maps**
+  (VERIFIED twice; the game scans `Tracks\` only at startup). "The map file does not exist"
+  means a wrong path: `map tmagent/<file>` (relative to `Tracks\Challenges`) works.
+- Car does not move (speed 0 after full gas): the game window had no focus while the map
+  intro played, so the start state was saved with the car still locked. `game.focus_window:
+  true` focuses the window before every map load; do not click into other windows during
+  a run.
+- Replay re-drive does not finish: analog replays (pad/wheel) drift off with binary
+  steering; download with `tools/tmx_download.py ... --keyboard-only`.
 - `restart returned race time 10 ms, expected 0`: TMI did not call `OnRunStep` at race
   time 0, the saved start state is one tick late. Report it (PROTOCOL.md "LOAD_MAP").
 - Frames upside down: `--set game.capture_flip_vertical=true` (or in `configs/tmnf.yaml`).

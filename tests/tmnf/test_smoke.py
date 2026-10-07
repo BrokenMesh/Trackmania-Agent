@@ -113,7 +113,7 @@ def test_smoke_replay_check_compares_the_finish_time(smoke, tmp_path, capsys):
         smoke.main([*common, "--out", str(tmp_path / "b"), "--expect-time-ms", str(ref + 10)]) == 1
     )
     assert "[FAIL  ] replay re-drive" in capsys.readouterr().out
-    assert "tick-offset" in (tmp_path / "b" / "tmnf_smoke_report.md").read_text()
+    assert "keyboard-only" in (tmp_path / "b" / "tmnf_smoke_report.md").read_text()
     # shifting the inputs by 3 ticks delays the finish, so it no longer matches the unshifted time
     assert (
         smoke.main(

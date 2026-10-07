@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import random
 import urllib.error
 import urllib.parse
 from email.message import Message
@@ -291,6 +292,25 @@ def test_select_spread_best_median_tail():
                 assert picked[-1] == n_items - 1
 
 
+def test_mixed_groups_best_worst_and_random_middle():
+    ranks = list(range(100))
+    groups = tmx.mixed_groups(ranks, 10, 3, 3, random.Random(0))
+    assert [q for q, _ in groups] == [3, 3, 4]
+    assert groups[0][1] == ranks and groups[1][1] == ranks[::-1]  # next fastest / next slowest
+    assert sorted(groups[2][1]) == ranks[3:97]  # random order over the middle only
+    again = tmx.mixed_groups(ranks, 10, 3, 3, random.Random(0))
+    assert groups[2][1] == again[2][1]  # seeded
+    assert [q for q, _ in tmx.mixed_groups(ranks, 4, 3, 3, random.Random(0))] == [3, 1]
+    assert tmx.mixed_groups(ranks, 0, 3, 3, random.Random(0)) == []
+    assert tmx.spread_groups(ranks[:10], 3) == [(1, [0]), (1, [4]), (1, [9])]
+
+
+def test_cap_replay_time_drops_afk_runs():
+    reps = [{"ReplayTime": t} for t in (20000, 25000, 40000, 40001, 56915800)]
+    assert [r["ReplayTime"] for r in tmx.cap_replay_time(reps, 2.0)] == [20000, 25000, 40000]
+    assert tmx.cap_replay_time(reps, None) == reps
+
+
 def test_param_and_path_helpers():
     assert tmx.parse_params(["a=1", "b=x=y", "a=2"]) == [("a", "1"), ("b", "x=y"), ("a", "2")]
     for bad in ("novalue", "=1"):
@@ -428,3 +448,28 @@ def test_read_tracks_file_dedupes(tmp_path: Path):
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n\n")
     assert [r["TrackId"] for r in tmx.read_tracks_file(p)] == [1, 2]
     assert tmx.read_tracks_file(p)[0]["UId"] == "a"
+
+
+def test_keyboard_only_replaces_rejected_replays_within_their_group(env, monkeypatch):
+    from tmagent.game.tmnf import replay as R
+
+    def even_ids_only(path: Path) -> bool:
+        return int(path.name.split("-")[1].split(".")[0]) % 2 == 0
+
+    monkeypatch.setattr(R, "is_keyboard_replay", even_ids_only)
+    tmp_path, clock, mock, run = env
+    assert run("tracks", "--max-tracks", "1") == 0
+    args = ("replays", "--per-track", "4", "--best", "1", "--worst", "1", "--keyboard-only")
+    assert run(*args) == 0
+    replays = tmp_path / "replays"
+    kept = sorted(int(p.name.split("-")[1].split(".")[0]) for p in replays.glob("*.Replay.Gbx"))
+    assert len(kept) == 4 and all(rid % 2 == 0 for rid in kept)
+    # ranks of track 100: 10000 fastest ... 10007 slowest; 10007 is rejected -> 10004 (rank 9)
+    assert 10000 in kept and 10004 in kept
+    state = json.loads((tmp_path / "out" / "state.json").read_text())
+    assert "10007" in state["rejected"] and all(int(r) % 2 for r in state["rejected"])
+    assert sorted(int(r) for r in state["replays"]) == kept
+
+    n = len(mock.urls("/recordgbx/"))
+    assert run(*args) == 0  # rejected replays are not downloaded again
+    assert len(mock.urls("/recordgbx/")) == n

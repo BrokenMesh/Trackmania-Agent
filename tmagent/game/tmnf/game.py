@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import warnings
 from pathlib import Path, PurePath
 
 import numpy as np
@@ -27,6 +28,7 @@ from tmagent.game.tmnf.client import (
     TMAgentError,
     convert_pixels,
 )
+from tmagent.game.tmnf.window import focus_game_window
 from tmagent.interfaces import Action, Frame, GameState
 
 MAP_SUFFIX = ".Challenge.Gbx"
@@ -182,6 +184,7 @@ class TMNFGame:
         self.frame_settle_renders = frame_settle_renders
         self.flip_vertical = flip_vertical
         self.map_info: tuple[str, str] | None = None  # (uid, name) reported by the plugin
+        self._loaded_path: Path | None = None
         self._mode: P.Mode | None = None
         self._last_input: P.InputCmd | None = None
         self._frame_cache: tuple[P.FrameMsg, Frame] | None = None
@@ -195,6 +198,7 @@ class TMNFGame:
             return
         c.connect()
         self._mode = None
+        self._loaded_path = None  # a new connection may be a restarted game
         for cmd in SETUP_COMMANDS:
             c.execute(cmd)
         m = re.fullmatch(r"cam(\d+)", self.cfg.camera.strip())
@@ -254,13 +258,33 @@ class TMNFGame:
         """Resolve `map_ref`, load it, and wait until the race is ready at t=0.
 
         Sync mode leaves the game paused at race time 0; realtime keeps it running.
+        The map loaded last in this session is not loaded again: every load replays the
+        intro (~12 s); start_race() / restart() rewind to its saved t=0 state instead.
         """
         path = resolve_map(map_ref, self.cfg.map_dir)
+        if path == self._loaded_path and self.client.connected and self._mode is not None:
+            return
         c = self._ensure(self._mode or P.Mode.SYNC)
+        if self.cfg.focus_window and not focus_game_window():
+            warnings.warn(
+                "could not focus the game window: the map intro will not finish and the car "
+                "stays locked; click into the game window",
+                stacklevel=2,
+            )
+        self._loaded_path = None
         text = c.load_map(map_command_path(path, self.map_path_style))
         uid, _, name = text.partition("\t")
         self.map_info = (uid, name)
+        self._loaded_path = path
         c.reset_pushed()  # drop pushed frames/states of the previous map
+
+    def forget_loaded_map(self) -> None:
+        """The next load_map loads the map again, so the plugin saves a fresh t=0 state.
+
+        VERIFIED need: after one map load all 10 D11-Acrobatic runs desynced (the saved start
+        state was bad); after a fresh load the same runs re-drove exactly.
+        """
+        self._loaded_path = None
 
     def start_race(self) -> GameState:
         """Sync: restart to race time 0 (paused) and return that state."""

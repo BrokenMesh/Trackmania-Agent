@@ -40,6 +40,7 @@ PAGE = Path(__file__).with_name("eval_ui.html")
 TRACK_LISTS = ("tmx/tracks.jsonl", "tmx_community/tracks.jsonl")
 RESULTS_NAME = "eval_ui_results.jsonl"
 CAMPAIGN_RE = re.compile(r"^([A-E])(\d\d)-")
+HEADER_RE = re.compile(rb'<ident uid="([^"]*)" name="([^"]*)"[^>]*/><desc[^>]*type="([^"]*)"')
 FORMAT_CODE_RE = re.compile(r"\$([0-9a-fA-F]{3}|[lh]\[[^\]]*\]|.)")
 
 
@@ -64,8 +65,18 @@ def list_checkpoints(base: Path) -> list[dict[str, str]]:
     return out
 
 
+def map_header(path: Path) -> tuple[str, str, str] | None:
+    """(uid, name, type) from a .Challenge.Gbx XML header, or None."""
+    m = HEADER_RE.search(path.read_bytes()[:16384])
+    if m is None:
+        return None
+    uid, name, kind = (g.decode("utf-8", "replace") for g in m.groups())
+    return uid, name, kind
+
+
 def list_maps(cfg: Config) -> list[dict[str, Any]]:
-    """Downloaded maps that exist in game.map_dir, campaign first, with their data split."""
+    """Maps in game.map_dir with their data split: TMX downloads (campaign first), then the
+    remaining files (e.g. extracted from the user's replays) as "own" race maps."""
     d, map_dir = cfg.data, Path(cfg.game.map_dir)
     seen, out = set(), []
     for name in TRACK_LISTS:
@@ -88,8 +99,17 @@ def list_maps(cfg: Config) -> list[dict[str, Any]]:
                     "split": split_of(uid, d.split_seed, d.val_frac, d.test_frac),
                 }
             )
+    own = []
+    for path in map_dir.glob("*.Challenge.Gbx"):
+        info = map_header(path)
+        if info is None or info[0] in seen or info[2] != "Race":
+            continue
+        seen.add(info[0])
+        split = split_of(info[0], d.split_seed, d.val_frac, d.test_frac)
+        own.append({"uid": info[0], "name": plain_name(info[1]), "campaign": None, "split": split})
     out.sort(key=lambda m: (m["campaign"] is None, m["campaign"] or "", m["name"].lower()))
-    return out
+    own.sort(key=lambda m: m["name"].lower())
+    return out + [{**m, "own": True} for m in own]
 
 
 @dataclass

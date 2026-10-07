@@ -88,6 +88,7 @@ ol.queue { margin: 0; padding-left: 20px; max-height: 160px; overflow: auto; }
         <button data-preset="a01-a10">A01–A10</button>
         <button data-preset="campaign">All campaign</button>
         <button data-preset="test">Test split</button>
+        <button data-preset="own">My maps</button>
         <button data-preset="shown">All shown</button>
         <button data-preset="none">None</button>
       </div>
@@ -171,7 +172,7 @@ function renderMaps() {
   box.innerHTML = visibleMaps().map((m) => `
     <label><input type="checkbox" data-uid="${esc(m.uid)}" ${selected.has(m.uid) ? "checked" : ""}>
       <span class="nm" title="${esc(m.uid)}">${esc(m.name)}</span>
-      <span class="chip ${m.split}">${m.split}</span></label>`).join("");
+      ${m.own ? '<span class="chip">own</span>' : ""}<span class="chip ${m.split}">${m.split}</span></label>`).join("");
   $("selcount").textContent = `(${selected.size} selected)`;
 }
 
@@ -180,6 +181,7 @@ function applyPreset(name) {
     "a01-a10": (m) => m.campaign && m.campaign[0] === "A" && +m.campaign.slice(1) <= 10,
     campaign: (m) => !!m.campaign,
     test: (m) => m.split === "test",
+    own: (m) => !!m.own,
   }[name];
   if (name === "none") selected.clear();
   else if (name === "shown") visibleMaps().forEach((m) => selected.add(m.uid));

@@ -197,3 +197,25 @@ and rejected. Numbers only from own measurements.
   labels are 3 %). Single frames carry no speed / approach-rate information: next lever
   is the 2 s context (PLAN Phase 3), then more data (render of ~1270 more replays runs).
 - Status: accepted (discrete3 + pwm is the new default for TMNF experiments).
+
+## D-017 (2026-10-07) DAgger with a line-following expert: one round, ~20 % share
+- Closed-loop failures are compounding error, not a pipeline bug (eval frames equal training
+  frames, live vs offline predictions corr 0.992). More human data (7.8 h -> 51.6 h) did not
+  help in closed loop.
+- Expert: `tmagent/eval/expert.py` LineExpert (copy the fastest human run's input when within
+  1.5 m and aligned, else pure pursuit 0.45 s ahead). Collection: `tools/collect_dagger.py`,
+  random agent / expert blocks plus intervention at 2.5 m, stop after 4 s without progress;
+  labels always from the expert. Training: `data.source_weights={dagger: w}`,
+  `train.init_from=<ckpt>`, lr 0.0001, 8-10k steps.
+- Results (3 attempts per map, steer noise 0.05): round 1 (1.24 h DAgger, 23 % of samples)
+  A01-A10 median 0.44 -> 0.60; rounds 2-3 (36-45 % of samples) fell back to 0.43. Unseen
+  test maps unchanged in every round (mean 0.07-0.08).
+- Decision: keep round 1 (`experiments/2026-10-07-ctx2_dagger1/checkpoints/step_010000.pt`)
+  as the current best; keep the expert share near 20 %; do not iterate DAgger with this
+  expert further. Next levers: better recovery labels (human takeovers via
+  `tools/eval_ui.py`, or a smoother analog expert), and recovery data on many more maps for
+  transfer.
+- Evaluation protocol from now on: >= 3 attempts per map with eval.action_noise 0.05; one
+  deterministic attempt per map is a point sample.
+- Status: accepted.
+

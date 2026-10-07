@@ -66,8 +66,16 @@ measured / reproduced, LIKELY = consistent evidence but not isolated. Decisions 
   VERIFIED: expert-takes-over-at-4 m alone does not work (the agent is already in a wall,
   runs end at 1-7 % progress). Alternating random blocks (agent 0.5-2 s, expert 1-2 s) plus
   intervention at 2.5 m, and ending a run after 4 s without progress, gives usable runs.
-- Results of the first DAgger round: see the WORKLOG entry of 2026-10-07 (filled in when
-  the fine-tune and eval finished).
+- VERIFIED (3 attempts per map, steer noise 0.05): one DAgger round (1.24 h, 23 % of the
+  training samples) lifts A01-A10 median progress 0.44 -> 0.60 (A01 0.05 -> 0.95, A08
+  0.03 -> 0.38). Two more rounds with a growing expert share (36-45 %) fell back to 0.43:
+  the expert drives worse than the humans (bang-bang steering, ~1.5x the human time), and
+  too much of it pulls the policy towards it. Keep the expert share near 20 %.
+- VERIFIED: no round transferred to unseen maps (test mean progress 0.07-0.08 throughout).
+  Recoveries learned on a map stay on that map. Transfer needs recovery data on far more
+  maps and/or better recovery labels (human takeovers).
+- VERIFIED: the simulation is deterministic, so one attempt per map is a point sample that
+  flips with tiny weight changes. Evaluate with >= 3 attempts and small action noise.
 
 ## 5. Implications for Phase 2 (memory agent)
 
@@ -79,6 +87,9 @@ measured / reproduced, LIKELY = consistent evidence but not isolated. Decisions 
   corrective label anywhere near the line, the DAgger collector produces agent-style
   deviations, and takeover mode (`tools/eval_ui.py`, plugin passthrough) records human
   recoveries. PLAN_PHASE2 M3 (session generator) can reuse these instead of a new expert.
+- Phase 2 synthetic failed attempts: a DAgger-style run (agent blocks, then the expert)
+  produces realistic "went wrong here" moments for free; the memory model can learn from
+  pairs of a failed and a corrected pass over the same section.
 - "Lost run" detection for Phase 2 can use the expert distance to the reference line
   (> 2.5 m, or no progress for 4 s) - the same signals that work for DAgger.
 - Budget realities: 1 game instance runs sync stepping at ~1x real time with a policy in

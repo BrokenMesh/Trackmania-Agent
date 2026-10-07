@@ -23,6 +23,7 @@ facts about TMNF tooling with sources).
 | Baseline training (single frame) | done, evaluated | 0/8 finished, median progress 0.126; 3-class steering + PWM: 0.145, A02 0.92 (D-016) |
 | Context model (2 s) | done, evaluated | full data (51.6 h): 0/26 test maps finished, median progress 0.051; first finish on A03 (train map) |
 | Dataset (campaign + community) | done | 3,585 episodes, 51.6 h, 259 maps (214 train / 19 val / 26 test) |
+| DAgger with line expert | done, evaluated | round 1 best: A01-A10 median 0.60 (was 0.44); unseen maps unchanged (D-017) |
 | Test drive UI | done | `python tools/eval_ui.py --config configs/tmnf.yaml` -> http://127.0.0.1:8600 |
 | Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
 
@@ -65,7 +66,21 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
   A01 0.05 -> 0.64, A08 0.03 -> 0.28; test maps unchanged within noise.
 - Round d2 (driver: dagger1 2.5k): 214 maps, 1.09 h, expert 76 %, mean progress 0.22.
   Round 2 training: init from dagger1 10k, human + d1 + d2, dagger weight 10.
-- Round d3 collection (driver: dagger1 10k) running in parallel.
+- Round d3 (driver: dagger1 10k): 214 maps, 1.14 h. Round 3 training: init dagger2,
+  human + d1..d3, dagger weight 7.
+- Single deterministic attempts are point samples (the sim is deterministic, tiny weight
+  changes flip a run). New protocol: 3 attempts per map, eval.action_noise=0.05:
+
+  | Model | A01-A10 median / mean (finishes of 30) | 26 test maps median / mean |
+  |---|---|---|
+  | ctx2_full | 0.443 / 0.470 (4) | 0.053 / 0.072 |
+  | dagger1 10k | **0.596 / 0.591** (4) | 0.048 / 0.076 |
+  | dagger3 8k | 0.434 / 0.476 (3) | 0.050 / 0.079 |
+
+  Round 1 is the best model (A01 0.05 -> 0.95, A08 0.03 -> 0.38). Rounds 2-3 did not add:
+  the expert share of the samples grew to ~36-45 % and its labels (bang-bang pursuit,
+  ~1.5x human time) pull the policy towards the worse driver. No transfer to unseen maps
+  in any round (D-017).
 - YAML gotcha: `train.lr=1e-4` parses as a string (YAML 1.1); write 0.0001.
 
 ## 2026-10-07 Session 3 (user machine, overnight)

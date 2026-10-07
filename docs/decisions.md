@@ -208,7 +208,8 @@ and rejected. Numbers only from own measurements.
   labels always from the expert. Training: `data.source_weights={dagger: w}`,
   `train.init_from=<ckpt>`, lr 0.0001, 8-10k steps.
 - Results (3 attempts per map, steer noise 0.05): round 1 (1.24 h DAgger, 23 % of samples)
-  A01-A10 median 0.44 -> 0.60; rounds 2-3 (36-45 % of samples) fell back to 0.43. Unseen
+  A01-A10 median 0.44 -> 0.60; rounds 2-3 (36-45 % of samples) fell back to 0.43, and all
+  three rounds at 23 % gave 0.45 (10 maps x 3 attempts: gaps of ~0.1 are partly noise). Unseen
   test maps unchanged in every round (mean 0.07-0.08).
 - Decision: keep round 1 (`experiments/2026-10-07-ctx2_dagger1/checkpoints/step_010000.pt`)
   as the current best; keep the expert share near 20 %; do not iterate DAgger with this

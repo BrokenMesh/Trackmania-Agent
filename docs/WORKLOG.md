@@ -43,6 +43,11 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
 
 ## 2026-10-07 Session 4 (overnight, autonomous): DAgger
 
+- Morning additions: recording mode in `tools/eval_ui.py` (`tmagent/data/player.py`, every
+  attempt saved, source "player:<session>"); 703 of the user's own keyboard replays copied
+  to `data/tmnf/replays_brokenmesh` (profile elkor3 = account brokenmesh3; originals not
+  touched) and their 636 embedded maps extracted with `tools/extract_replay_maps.py`.
+
 - Pipeline check (VERIFIED): a human A01 replay re-driven through the eval loop gives the
   training frames (mean |diff| 0.7/255) and the same predictions (corr 0.992). The
   closed-loop gap is compounding error, not a bug.
@@ -76,8 +81,10 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
   | ctx2_full | 0.443 / 0.470 (4) | 0.053 / 0.072 |
   | dagger1 10k | **0.596 / 0.591** (4) | 0.048 / 0.076 |
   | dagger3 8k | 0.434 / 0.476 (3) | 0.050 / 0.079 |
+  | d1+d2+d3 at 23 % (from ctx2_full, 10k) | 0.445 / 0.520 (4) | 0.048 / 0.082 |
 
-  Round 1 is the best model (A01 0.05 -> 0.95, A08 0.03 -> 0.38). Rounds 2-3 did not add:
+  Round 1 is the best model (A01 0.05 -> 0.95, A08 0.03 -> 0.38). More DAgger data at the
+  same 23 % share (all three rounds) did not beat it either. Rounds 2-3 did not add:
   the expert share of the samples grew to ~36-45 % and its labels (bang-bang pursuit,
   ~1.5x human time) pull the policy towards the worse driver. No transfer to unseen maps
   in any round (D-017).

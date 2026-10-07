@@ -70,7 +70,8 @@ measured / reproduced, LIKELY = consistent evidence but not isolated. Decisions 
   training samples) lifts A01-A10 median progress 0.44 -> 0.60 (A01 0.05 -> 0.95, A08
   0.03 -> 0.38). Two more rounds with a growing expert share (36-45 %) fell back to 0.43:
   the expert drives worse than the humans (bang-bang steering, ~1.5x the human time), and
-  too much of it pulls the policy towards it. Keep the expert share near 20 %.
+  too much of it pulls the policy towards it. Keep the expert share near 20 %. All three
+  rounds at 23 % gave 0.45: more of this expert's data does not help either.
 - VERIFIED: no round transferred to unseen maps (test mean progress 0.07-0.08 throughout).
   Recoveries learned on a map stay on that map. Transfer needs recovery data on far more
   maps and/or better recovery labels (human takeovers).

@@ -1,6 +1,6 @@
 """Save the maps embedded in .Replay.Gbx files, so replays of unknown maps can be rendered.
 
-    python tools/extract_replay_maps.py --replays data/tmnf/replays_brokenmesh --config configs/tmnf.yaml
+    python tools/extract_replay_maps.py --replays <dir> --config configs/tmnf.yaml
 
 Every TMNF replay carries its map (chunk 0x03093002). The map is written to game.map_dir as
 <uid>.Challenge.Gbx (uid from the replay's XML header); existing files are never touched.

@@ -54,7 +54,18 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
 - Step 2.5k, 30-map eval: train maps A01 0.05 -> 0.53 (first-corner crash gone),
   A02 0.46 -> 0.91, A05 0.19 -> 0.49; 26 unseen test maps unchanged (mean 0.067 -> 0.055,
   noise). DAgger fixes recoveries where it collected; no transfer to new maps yet.
-- Round d2 collection started with the 2.5k checkpoint (DAgger iteration 2).
+- Round d1 final (10k steps), 36 maps x 1 attempt:
+
+  | | ctx2_full | dagger1 10k |
+  |---|---|---|
+  | A01-A10 median progress | 0.21 | 0.55 |
+  | A01-A10 finishes | 1 (A03) | 2 (A02, A03) |
+  | 26 test maps median / mean | 0.051 / 0.067 | 0.042 / 0.079 |
+
+  A01 0.05 -> 0.64, A08 0.03 -> 0.28; test maps unchanged within noise.
+- Round d2 (driver: dagger1 2.5k): 214 maps, 1.09 h, expert 76 %, mean progress 0.22.
+  Round 2 training: init from dagger1 10k, human + d1 + d2, dagger weight 10.
+- Round d3 collection (driver: dagger1 10k) running in parallel.
 - YAML gotcha: `train.lr=1e-4` parses as a string (YAML 1.1); write 0.0001.
 
 ## 2026-10-07 Session 3 (user machine, overnight)

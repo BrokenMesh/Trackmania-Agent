@@ -695,6 +695,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    sys.stdout.reconfigure(errors="replace")  # replay / map names with odd characters
     cfg = load_config(args.config, args.overrides)
     kw: dict[str, Any] = {
         "overwrite": args.overwrite,

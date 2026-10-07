@@ -23,6 +23,7 @@ facts about TMNF tooling with sources).
 | Baseline training (single frame) | done, evaluated | 0/8 finished, median progress 0.126; 3-class steering + PWM: 0.145, A02 0.92 (D-016) |
 | Context model (2 s) | done, evaluated | full data (51.6 h): 0/26 test maps finished, median progress 0.051; first finish on A03 (train map) |
 | Dataset (campaign + community) | done | 3,585 episodes, 51.6 h, 259 maps (214 train / 19 val / 26 test) |
+| User replays (brokenmesh3) | rendered | 696 episodes on 632 own maps; dataset 64.7 h, not trained on yet |
 | DAgger with line expert | done, evaluated | round 1 best: A01-A10 median 0.60 (was 0.44); unseen maps unchanged (D-017) |
 | Test drive UI | done | `python tools/eval_ui.py --config configs/tmnf.yaml` -> http://127.0.0.1:8600 |
 | Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
@@ -47,6 +48,10 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
   attempt saved, source "player:<session>"); 703 of the user's own keyboard replays copied
   to `data/tmnf/replays_brokenmesh` (profile elkor3 = account brokenmesh3; originals not
   touched) and their 636 embedded maps extracted with `tools/extract_replay_maps.py`.
+- User replays rendered (single instance, 10:26-16:20): 696 of 703 exact (finish time
+  reproduced), skipped 1 desync, 1 map that hangs the loader (bad_map list), 2 respawn runs.
+  Dataset now 64.7 h (train 51.7 / val 8.6 / test 4.5); the 26 original test maps keep their
+  split (split by map hash). Not trained on yet.
 
 - Pipeline check (VERIFIED): a human A01 replay re-driven through the eval loop gives the
   training frames (mean |diff| 0.7/255) and the same predictions (corr 0.992). The

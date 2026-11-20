@@ -21,6 +21,7 @@ import numpy as np
 
 from tmagent.config import Config
 from tmagent.data.player import (
+    RESTART_BACK_MS,
     KeyReader,
     PlayerSegment,
     Requests,
@@ -45,7 +46,9 @@ class TakeoverControl(Requests):
 def save_segment(
     seg: PlayerSegment, cfg: Config, map_uid: str, map_name: str, ckpt: str
 ) -> Path | None:
-    """Store a takeover segment as an episode (source "takeover"); None if too short."""
+    """Store the part of a takeover segment after its last respawn as an episode (source
+    "takeover"); None if that is too short."""
+    seg = seg.after_last_respawn()
     stamp = time.strftime("%Y%m%d-%H%M%S")
     meta = {
         "episode_id": f"{map_uid}-takeover-{stamp}-{seg.start_ms}",
@@ -67,15 +70,47 @@ def _drive_player(
     state: GameState,
     read_keys: KeyReader,
     on_frame: Callable[[ProgressTracker], None] | None,
-) -> tuple[GameState, PlayerSegment]:
+) -> tuple[GameState, list[PlayerSegment]]:
     """Realtime + passthrough until hand back (H / request) or the finish; the policy keeps
-    observing the frames so its history is current when it drives again."""
-    d, r = cfg.data, cfg.data.actions_per_frame
+    observing the frames so its history is current when it drives again. A restart of the
+    race (the game's restart key) ends the segment, resets the policy and the progress, and
+    the player keeps driving in a new segment."""
     control.phase = "player"
     game.hand_to_player()
-    seg = PlayerSegment(start_ms=int(state.race_time_ms))
-    frame_ms = 1000.0 / d.frame_hz
-    next_obs = [float(state.race_time_ms)]
+
+    segments = []
+    while True:
+        seg = PlayerSegment(start_ms=max(int(state.race_time_ms), 0))
+        end, state = _drive_player_segment(
+            game, policy, cfg, tracker, control, seg, read_keys, on_frame
+        )
+        segments.append(seg)
+        if end != "restart":
+            break
+
+        policy.reset()
+        tracker.restart()
+
+    state = game.take_back()
+    tracker.revive()
+    control.phase = "agent"
+    return state, segments
+
+
+def _drive_player_segment(
+    game: Any,
+    policy: ChunkPolicy,
+    cfg: Config,
+    tracker: ProgressTracker,
+    control: TakeoverControl,
+    seg: PlayerSegment,
+    read_keys: KeyReader,
+    on_frame: Callable[[ProgressTracker], None] | None,
+) -> tuple[str, GameState]:
+    """Record one player segment until "finished", "hand_back" or "restart"."""
+    r = cfg.data.actions_per_frame
+    frame_ms = 1000.0 / cfg.data.frame_hz
+    next_obs = [float(seg.start_ms)]
 
     def observe(frame: Any) -> None:
         if frame.race_time_ms >= next_obs[0]:
@@ -83,6 +118,8 @@ def _drive_player(
             next_obs[0] += frame_ms
 
     def stop(st: GameState, keys: tuple) -> str | None:
+        if seg.inputs and st.race_time_ms < seg.end_ms - RESTART_BACK_MS:
+            return "restart"
         if on_frame is not None:
             on_frame(tracker)
         tracker.update(st, judge=False)
@@ -93,11 +130,7 @@ def _drive_player(
             return "hand_back"
         return None
 
-    drive_segment(game, seg, read_keys, stop, on_frame=observe)
-    state = game.take_back()
-    tracker.revive()
-    control.phase = "agent"
-    return state, seg
+    return drive_segment(game, seg, read_keys, stop, on_frame=observe)
 
 
 def run_takeover_episode(
@@ -134,14 +167,16 @@ def run_takeover_episode(
             on_frame(tracker)
         req = control.pop()
         if req == "take_over" or any(read_keys()[:4]):
-            state, seg = _drive_player(
+            state, segments = _drive_player(
                 game, policy, cfg, tracker, control, state, read_keys, on_frame
             )
             takeovers += 1
-            player_ms += seg.duration_ms
-            if on_segment is not None:
-                on_segment(seg)
-            past = np.tile(seg.last_action(), (d.actions_per_frame, 1))
+            for seg in segments:
+                player_ms += seg.duration_ms
+                if on_segment is not None:
+                    on_segment(seg)
+
+            past = np.tile(segments[-1].last_action(), (d.actions_per_frame, 1))
             k = int(state.race_time_ms) * d.frame_hz // 1000
             continue
         if control.phase == "waiting":

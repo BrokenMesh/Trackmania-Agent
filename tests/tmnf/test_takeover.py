@@ -22,7 +22,7 @@ from tmagent.eval.takeover import (
 from tmagent.game.tmnf import protocol as P
 from tmagent.game.tmnf.fake_server import FakePluginServer
 from tmagent.game.tmnf.game import TMNFGame
-from tmagent.interfaces import Action
+from tmagent.interfaces import Action, GameState
 
 W, H = 16, 12
 
@@ -164,3 +164,76 @@ def test_retry_resumes_the_agent_and_short_segments_are_not_saved(
         start_ms=0, inputs=[(0, np.zeros(3, np.float32), np.zeros(3, np.float32), 0.0)]
     )
     assert save_segment(short, cfg, "u", "n", "c") is None
+
+
+def _segment(positions_by_ms: dict[int, float]) -> PlayerSegment:
+    """Samples every 2 ms (like the 500 Hz poll), x position given per race-time range."""
+    seg = PlayerSegment(start_ms=0)
+    bounds = sorted(positions_by_ms)
+    for t in range(0, 3000, 2):
+        x = positions_by_ms[max(b for b in bounds if b <= t)] + t * 0.01
+        st = GameState(t, np.array([x, 0.0, 0.0]), np.zeros(3), 36.0, 0, False)
+        seg.add_state(st, np.zeros(3, np.float32))
+    return seg
+
+
+def test_a_respawn_cuts_the_segment_to_the_part_after_it():
+    seg = _segment({0: 0.0, 1500: 300.0})
+    seg.frames = [(t, np.zeros((H, W, 3), np.uint8)) for t in range(0, 3000, 50)]
+    assert seg.respawns == 1
+    after = seg.after_last_respawn()
+    assert after.start_ms == 1500 and after.inputs[0][0] == 1500
+    assert after.frames[0][0] == 1500 and after.respawns == 0
+
+
+def test_glitches_and_unconfirmed_jumps_are_not_respawns():
+    one_sample_glitch = _segment({0: 0.0, 1000: 500.0, 1002: 0.0})
+    jump_at_the_end = _segment({0: 0.0, 2900: 300.0})
+    for seg in (one_sample_glitch, jump_at_the_end):
+        assert seg.respawns == 0 and seg.after_last_respawn() is seg
+
+
+def test_a_game_restart_during_a_takeover_starts_a_new_segment(game, server, cfg):
+    control = TakeoverControl()
+    segments: list[PlayerSegment] = []
+    t_player: list[float] = []
+    resets = []
+
+    def read_keys():
+        if control.phase == "waiting" and not t_player:
+            return (False, False, True, False, False)
+        if control.phase == "player":
+            if not t_player:
+                t_player.append(time.monotonic())
+            elapsed = time.monotonic() - t_player[0]
+            if elapsed > 0.6 and not resets:
+                with server._lock:
+                    server._reset_race()  # what the game's restart key does to race time
+                resets.append(elapsed)
+            held = elapsed < 1.6
+            server.player_input = P.InputCmd(accelerate=held)
+            return (False, False, held, False, not held)
+        return (False, False, False, False, False)
+
+    class CountingPolicy(StillPolicy):
+        resets = 0
+
+        def reset(self) -> None:
+            super().reset()
+            CountingPolicy.resets += 1
+
+    ref = ReferencePath(np.array([[0.0, 0.0, 0.0], [500.0, 0.0, 0.0]]))
+    result = run_takeover_episode(
+        game, CountingPolicy(), "Alpha", cfg, 0, ref, control,
+        on_segment=segments.append, read_keys=read_keys,
+    )  # fmt: skip
+    assert result["finished"] and result["takeovers"] == 1 and CountingPolicy.resets == 2
+    first, second = segments
+    assert first.start_ms > 0 and first.duration_ms > 0
+    assert second.start_ms < first.end_ms and second.duration_ms > 1000
+    times = [t for t, *_ in second.inputs]
+    assert times == sorted(times)
+
+    ep = load_episode(save_segment(second, cfg, "FAKEUID_Alpha", "Alpha", "ckpt.pt"))
+    assert split_issues(check_episode(ep, cfg.data))[0] == []
+    assert ep.meta["segment_start_ms"] == second.start_ms and ep.meta["respawns"] == 0

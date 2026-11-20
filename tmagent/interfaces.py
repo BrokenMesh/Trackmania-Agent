@@ -184,6 +184,7 @@ class Episode:
     positions: np.ndarray  # float32 (T_a, 3) car position at action_times_ms
     speeds_kmh: np.ndarray  # float32 (T_a,)
     meta: dict[str, Any]  # see EPISODE_META_KEYS
+    weights: np.ndarray | None = None  # float32 (T_a,) per-step loss weight, None = all 1
 
 
 EPISODE_META_KEYS = (

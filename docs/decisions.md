@@ -220,3 +220,25 @@ and rejected. Numbers only from own measurements.
   deterministic attempt per map is a point sample.
 - Status: accepted.
 
+
+## D-018 (2026-11-20) RL test on A01-A10: reward-weighted BC (AWR style), user request
+- PLAN.md keeps RL out of scope unless the user asks; the user asked for a small RL test on
+  A01-A10 (stuck check and completion speed as reward).
+- Method (`tmagent/eval/rl.py`, `tools/collect_rl.py`, `tools/rl_rounds.py`): the policy drives
+  with sampled actions (steer class from the softmax, gas / brake Bernoulli, temperature 1),
+  the executed actions are the labels. Reward per control step: progress along the reference
+  line (clipped to 5 m per step, so projection jumps on stunt maps earn nothing), -50 m when
+  the run ends stuck / offtrack / stalled, +50 m at the finish; speed is rewarded through
+  progress per time. Advantage = discounted return (3 s horizon) minus the mean return of all
+  attempts of the round at the same 5 m stretch of line; weight exp(A / std(A)), capped at
+  20, mean 1 per map. No value network: the attempts on the same map are the baseline.
+- Training: fine-tune from the previous round's checkpoint on human data + dagger:d1 (weight
+  10, the dagger1 recipe) + all rl:* episodes at 25 % of the sampled windows, lr 0.0001,
+  2500 steps; per-step weights multiply the BC loss mask. Human data keeps the policy near BC.
+- Chosen over PPO for the first test: it reuses the BC training loop and needs no value head
+  or on-policy optimizer. PPO is the next step if reward weighting moves A01-A10.
+- Evaluation: the D-017 protocol (3 attempts per map, steer noise 0.05) after every round,
+  logged to data/tmnf/rl_rounds.jsonl. Start: dagger1 10k (A01-A10 median 0.60).
+- Budget: one round ~70 min on the user PC (6 attempts x 10 maps ~30 min, training ~23 min,
+  eval ~15 min). One game instance.
+- Status: built and tested on the fake game; not yet run on TMNF.

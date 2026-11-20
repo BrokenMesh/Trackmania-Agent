@@ -44,6 +44,13 @@ def check_alignment(ep: Episode | EpisodeReader, cfg: DataConfig, where: str = "
         raise ValueError(f"{where}: frames {shape} != {(h, w, cfg.channels)}")
 
 
+def source_weight(source: str, source_weights: dict[str, float]) -> float:
+    """Sampling weight of an episode source: exact match first, then its kind, then 1."""
+    if source in source_weights:
+        return float(source_weights[source])
+    return float(source_weights.get(source.split(":", 1)[0], 1.0))
+
+
 def build_window(ep: Episode | EpisodeReader, k_end: int, cfg: DataConfig) -> dict[str, np.ndarray]:
     """Numpy window ending at frame index k_end (no augmentation).
 
@@ -70,6 +77,12 @@ def build_window(ep: Episode | EpisodeReader, k_end: int, cfg: DataConfig) -> di
     target_valid = frame_valid[:, None] & (tidx < t_a)
     target = ep.actions[np.minimum(tidx, t_a - 1)].astype(np.float32)
     target[~target_valid] = 0.0
+    weights = ep.weights
+    if weights is None:
+        target_weight = np.ones(target_valid.shape, np.float32)
+    else:
+        target_weight = weights[np.minimum(tidx, t_a - 1)].astype(np.float32)
+    target_weight[~target_valid] = 0.0
     return {
         "frames": frames,
         "frame_valid": frame_valid,
@@ -77,6 +90,7 @@ def build_window(ep: Episode | EpisodeReader, k_end: int, cfg: DataConfig) -> di
         "hist_valid": hist_valid,
         "target": target,
         "target_valid": target_valid,
+        "target_weight": target_weight,
     }
 
 
@@ -132,11 +146,9 @@ class WindowDataset(Dataset):
         return int(self._starts[-1])
 
     def window_weights(self, source_weights: dict[str, float]) -> np.ndarray:
-        """Per-window sampling weight from the episode's source kind (meta "source" before ":")."""
-        per_ep = [
-            float(source_weights.get(str(e.get("source", "")).split(":", 1)[0], 1.0))
-            for e in self.entries
-        ]
+        """Per-window sampling weight from the episode's source: the full source (e.g.
+        "dagger:d1") if listed, else its kind (the part before ":"), else 1."""
+        per_ep = [source_weight(str(e.get("source", "")), source_weights) for e in self.entries]
         return np.repeat(np.array(per_ep, np.float64), np.diff(self._starts))
 
     def __getstate__(self) -> dict[str, Any]:

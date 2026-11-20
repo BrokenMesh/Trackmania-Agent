@@ -15,7 +15,15 @@ from .test_helpers import decode_tick, small_cfg, write_dataset
 
 R = 3
 CHUNK = 8
-KEYS = {"frames", "frame_valid", "hist_actions", "hist_valid", "target", "target_valid"}
+KEYS = {
+    "frames",
+    "frame_valid",
+    "hist_actions",
+    "hist_valid",
+    "target",
+    "target_valid",
+    "target_weight",
+}
 
 
 def cfg_for(history_s: float, **kw):

@@ -29,6 +29,8 @@ def bc_loss(
     """
     target = batch["target"].float()  # [B, K, C, 3]
     mask = batch["target_valid"].float()  # [B, K, C]
+    if "target_weight" in batch:
+        mask = mask * batch["target_weight"].float()
     t_steer = target[..., 0]
     t_gas = (target[..., 1] >= 0.5).float()
     t_brake = (target[..., 2] >= 0.5).float()

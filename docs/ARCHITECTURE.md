@@ -91,9 +91,10 @@ the single-frame baseline):
 | `hist_valid`   | bool `[B, K]`            | False if that history is before episode start, or dropped by augmentation |
 | `target`       | float32 `[B, K, C_len, 3]` | for step k: actions at `t_k + j * 1000/control_hz`, j = 0..C_len-1 |
 | `target_valid` | bool `[B, K, C_len]`     | False past episode end |
+| `target_weight` | float32 `[B, K, C_len]` | per-target loss weight: the episode's `weights` (RL advantage weights, D-018), else 1; 0 where not valid |
 | `progress`     | float32 `[B, K]`         | optional, track progress in [0, 1] (aux / analysis only) |
 
-Loss is computed at every step k (dense, causal), masked by `target_valid`.
+Loss is computed at every step k (dense, causal), masked by `target_valid` x `target_weight`.
 
 ## Model (`tmagent/model`)
 

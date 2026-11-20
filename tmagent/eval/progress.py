@@ -70,6 +70,10 @@ class ProgressTracker:
 
     def __init__(self, ref: ReferencePath, cfg: EvalConfig) -> None:
         self.ref, self.cfg = ref, cfg
+        self.restart()
+
+    def restart(self) -> None:
+        """Forget the run so far: the race was restarted from the start (takeover mode)."""
         self.done = False
         self.reason: str | None = None
         self.s = 0.0  # last projection (arc length); the car starts at the path start

@@ -31,6 +31,8 @@ POLL_S = 0.002
 WAIT_POLL_S = 0.05
 MIN_SEGMENT_MS = 1000  # shorter segments are not worth a training episode
 RESPAWN_JUMP_M = 15.0  # position jump between two samples that counts as a respawn
+RESPAWN_CONFIRM_MS = 200  # the car must stay away this long, single-sample glitches do not count
+FRAME_AHEAD_MS = 100  # a frame further ahead of the state is stale (from before a restart)
 RESTART_BACK_MS = 50  # race time going back by more than this = the race was restarted
 KeyReader = Callable[[], tuple[bool, bool, bool, bool, bool]]  # left right gas brake H
 
@@ -73,7 +75,10 @@ class PlayerSegment:
     frames: list[tuple[int, np.ndarray]] = field(default_factory=list)
     finished: bool = False
     finish_ms: int | None = None  # race time of the finish, if finished
-    respawns: int = 0
+
+    @property
+    def respawns(self) -> int:
+        return len(self.respawn_starts())
 
     @property
     def end_ms(self) -> int:
@@ -88,9 +93,43 @@ class PlayerSegment:
 
     def add_state(self, st: GameState, action: np.ndarray) -> None:
         pos = np.asarray(st.position, np.float32).reshape(3)
-        if self.inputs and np.linalg.norm(pos - self.inputs[-1][2]) > RESPAWN_JUMP_M:
-            self.respawns += 1
         self.inputs.append((int(st.race_time_ms), action, pos, float(st.speed_kmh)))
+
+    def respawn_starts(self) -> list[int]:
+        """Indices into `inputs` of the first sample after each respawn: a jump of more than
+        RESPAWN_JUMP_M after which the median position of the next RESPAWN_CONFIRM_MS stays that
+        far from the median position of the RESPAWN_CONFIRM_MS before."""
+        if len(self.inputs) < 2:
+            return []
+        times = np.array([t for t, *_ in self.inputs], np.int64)
+        pos = np.stack([p for _, _, p, _ in self.inputs])
+        jumps = np.where(np.linalg.norm(np.diff(pos, axis=0), axis=1) > RESPAWN_JUMP_M)[0] + 1
+
+        starts = []
+        for i in jumps:
+            if times[-1] - times[i] < RESPAWN_CONFIRM_MS:
+                continue
+            lo = np.searchsorted(times, times[i - 1] - RESPAWN_CONFIRM_MS, side="left")
+            hi = np.searchsorted(times, times[i] + RESPAWN_CONFIRM_MS, side="right")
+            before, after = np.median(pos[lo:i], axis=0), np.median(pos[i:hi], axis=0)
+            if np.linalg.norm(after - before) > RESPAWN_JUMP_M:
+                starts.append(int(i))
+        return starts
+
+    def after_last_respawn(self) -> PlayerSegment:
+        """The part after the last respawn (the segment itself if there was none): before a
+        respawn the player gives up, and the model has no respawn action to learn that from."""
+        starts = self.respawn_starts()
+        if not starts:
+            return self
+        t0 = self.inputs[starts[-1]][0]
+        return PlayerSegment(
+            start_ms=t0,
+            inputs=self.inputs[starts[-1] :],
+            frames=[f for f in self.frames if f[0] >= t0],
+            finished=self.finished,
+            finish_ms=self.finish_ms,
+        )
 
     def to_episode(self, cfg: DataConfig, meta: dict[str, Any]) -> Episode:
         """Resample to the dataset grids, with times relative to the segment start."""
@@ -160,7 +199,10 @@ def drive_segment(
             return reason, st
         seg.add_state(st, keys_to_action(*keys[:4]))
         frame = game.latest_frame()
-        if frame is not None and frame.race_time_ms > last_frame_t:
+        if (
+            frame is not None
+            and last_frame_t < frame.race_time_ms <= st.race_time_ms + FRAME_AHEAD_MS
+        ):
             last_frame_t = frame.race_time_ms
             if frame.race_time_ms >= seg.start_ms:
                 seg.frames.append((frame.race_time_ms, frame.image))

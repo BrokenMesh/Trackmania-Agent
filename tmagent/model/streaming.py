@@ -85,18 +85,27 @@ class StreamingPolicy:
     @torch.inference_mode()
     def predict(self) -> np.ndarray:
         """float32 (chunk_len, 3) for the last observed frame."""
+        chunk = self.model.decode(self._forward(), binarize=self.binarize)[0, -1]
+        return chunk.float().cpu().numpy().astype(np.float32)
+
+    @torch.inference_mode()
+    def predict_outputs(self) -> dict[str, np.ndarray]:
+        """Raw head outputs for the last observed frame, float32 with leading dim chunk_len:
+        steer_logits (chunk_len, bins) or steer (chunk_len,), gas and brake logits."""
+        out = self._forward()
+        return {k: v[0, -1].float().cpu().numpy() for k, v in out.items()}
+
+    def _forward(self) -> dict[str, torch.Tensor]:
         if self._n_obs == 0:
             raise RuntimeError("predict() called before observe()")
         sl = slice(self.k - min(self._n_obs, self.k), None)  # drop the invalid left padding
         with autocast_ctx(self.device, self.precision):
-            out = self.model.forward_tokens(
+            return self.model.forward_tokens(
                 self._tokens[None, sl],
                 self._frame_valid[None, sl],
                 self._hist[None, sl],
                 self._hist_valid[None, sl],
             )
-        chunk = self.model.decode(out, binarize=self.binarize)[0, -1]
-        return chunk.float().cpu().numpy().astype(np.float32)
 
 
 def load_policy(

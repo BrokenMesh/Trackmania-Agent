@@ -26,9 +26,14 @@ facts about TMNF tooling with sources).
 | User replays (brokenmesh3) | rendered | 696 episodes on 632 own maps; dataset 64.7 h, not trained on yet |
 | DAgger with line expert | done, evaluated | round 1 best: A01-A10 median 0.60 (was 0.44); unseen maps unchanged (D-017) |
 | Test drive UI | done | `python tools/eval_ui.py --config configs/tmnf.yaml` -> http://127.0.0.1:8600 |
+| Takeover mode (human recoveries) | verified live | 15 segments, 2.8 min on A01-A10 (2026-11-20); cut at respawns, restart = new segment |
+| RL test, reward-weighted BC (D-018) | built, fake-tested | `python tools/rl_rounds.py --config configs/tmnf.yaml --ckpt <dagger1 10k> --eval-start`; not run on TMNF yet |
 | Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
 
-Test suite: `python -m pytest -q` -> 463 passed, 4 skipped (CPU, ~60 s).
+Test suite: `python -m pytest -q` -> 502 passed, 3 failed, 4 skipped on the Windows PC (2026-11-20,
+~2 min). The 3 failures are platform-only and fail without the session-5 changes too (no fork,
+`\` in paths, case-insensitive glob): test_reader_survives_pickle_and_fork,
+test_map_command_path_styles, test_find_replays.
 Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
 
 ### Next steps (user machine)
@@ -41,6 +46,33 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
    -> docs/latency.md; fill the plan's success criteria (TBD values).
 5. Small data run (a few maps, tens of replays) with render_replays + quality,
    then baseline training (single frame, no history), closed-loop eval.
+
+## 2026-11-20 Session 5 (user machine): takeover mode live
+
+- First live takeover session (plugin 0.2.0, checkpoint dagger1 10k), A01-A10, 1 run each.
+  All 10 finished; A03 and A05 without any help. 15 player segments saved (2.8 min after
+  the cuts below), all on train maps.
+- Data check: passthrough driving, labels and frames are sound (sampling jitter only, some
+  repeated frames). Two problems found and fixed:
+  - Checkpoint respawns (4 segments, jumps of 280-370 m): before a respawn the player gives
+    up (no keys), and the model has no respawn action. Takeover segments now keep only the
+    part after the last respawn (`PlayerSegment.after_last_respawn`). The 4 saved
+    segments were cut the same way (originals in `data/tmnf/takeover_backup_2026-11-20`).
+  - A full restart (race time jumps back) did not end the segment: A04's segment had a
+    negative duration and was lost. Now it ends the segment, resets policy and progress,
+    and the player keeps driving in a new segment.
+  - Also fixed: a jump counted as a respawn on single-sample position glitches (A01, A06,
+    A07 had false counts); respawns now need the car to stay away 200 ms. After a restart
+    the newest streamed frame was still the pre-restart one and blocked all newer frames;
+    frames ahead of the state's race time are now ignored.
+- Next: short corrections ("fix it and hand back") on many different train maps, not
+  just A01-A10; then fine-tune with takeover data as a weighted source.
+- RL test built on user request (D-018): sampled driving, progress reward, advantage weights
+  per step stored with the episode (`Episode.weights`, optional `weights` array in
+  arrays.npz, `target_weight` in training windows, multiplies the loss mask), exact-source
+  sampling weights (`dagger:d1` before `dagger`). End-to-end round verified on the fake game
+  (collect -> train -> eval -> rl_rounds.jsonl); the dagger1 checkpoint samples correctly
+  offline. Not run on TMNF yet: the game was in use for takeovers.
 
 ## 2026-10-07 Session 4 (overnight, autonomous): DAgger
 

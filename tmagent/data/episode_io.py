@@ -71,6 +71,10 @@ def _write_dir(d: Path, ep: Episode) -> None:
         for i, frame in enumerate(ep.frames):
             offsets[i + 1] = offsets[i] + f.write(zlib.compress(frame.tobytes(), level=3))
     arrays = {k: getattr(ep, k) for k in _SMALL_ARRAYS}
+    if ep.weights is not None:
+        if len(ep.weights) != len(ep.actions):
+            raise ValueError(f"weights {len(ep.weights)} != actions {len(ep.actions)}")
+        arrays["weights"] = np.asarray(ep.weights, np.float32)
     np.savez(
         d / "arrays.npz",
         frame_offsets=offsets,
@@ -138,6 +142,7 @@ class EpisodeReader:
             )
         with np.load(self.path / "arrays.npz", allow_pickle=False) as z:
             self._arrays = {k: z[k] for k in (*_SMALL_ARRAYS, "frame_offsets", "frame_shape")}
+            self.weights: np.ndarray | None = z["weights"] if "weights" in z.files else None
         self._offsets: np.ndarray = self._arrays["frame_offsets"]
         self.frame_shape: tuple[int, ...] = tuple(int(v) for v in self._arrays["frame_shape"])
 
@@ -190,6 +195,7 @@ class EpisodeReader:
         return Episode(
             frames=self.frames(np.arange(self.num_frames)),
             meta=dict(self._meta),
+            weights=self.weights,
             **{k: self._arrays[k] for k in _SMALL_ARRAYS},
         )
 

@@ -101,17 +101,39 @@ def drive_frame_period(
     cfg: Config,
     tracker: ProgressTracker,
 ) -> GameState:
-    """Step tick by tick until frame k + 1 is due, each tick running its chunk row."""
+    """Run the ticks until frame k + 1 is due, each tick with its chunk row (one batch of
+    ticks, see step_ticks); the tracker sees the state after every tick."""
     d = cfg.data
+    if tracker.done:
+        return state
     t_next = round((k + 1) * 1000 / d.frame_hz)
-    while state.race_time_ms < t_next and not tracker.done:
-        j = control_row_for_tick(state.race_time_ms, k, d.control_hz, d.actions_per_frame)
-        prev_t = state.race_time_ms
-        state = game.step(Action.from_array(rows[j]), 1)
+    ticks = range(int(state.race_time_ms), t_next, PHYSICS_TICK_MS)
+    rows_of = [control_row_for_tick(t, k, d.control_hz, d.actions_per_frame) for t in ticks]
+
+    prev_t = state.race_time_ms
+    for state in step_ticks(game, [Action.from_array(rows[j]) for j in rows_of]):
         if state.race_time_ms <= prev_t and not state.finished:
             raise RuntimeError("game did not advance the race time")
+        prev_t = state.race_time_ms
         tracker.update(state)
+        if tracker.done:
+            break
     return state
+
+
+def step_ticks(game: SyncGame, actions: list[Action]) -> list[GameState]:
+    """One tick per action, the state after each tick (fewer at the finish): one round trip
+    when the game has step_sequence (TMNF plugin 0.3.0+), else tick by tick."""
+    step_sequence = getattr(game, "step_sequence", None)
+    if step_sequence is not None:
+        return step_sequence(actions)
+
+    states = []
+    for action in actions:
+        states.append(game.step(action, 1))
+        if states[-1].finished:
+            break
+    return states
 
 
 def run_episode_sync(

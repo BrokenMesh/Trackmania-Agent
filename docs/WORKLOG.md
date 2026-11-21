@@ -27,7 +27,7 @@ facts about TMNF tooling with sources).
 | DAgger with line expert | done, evaluated | round 1 best: A01-A10 median 0.60 (was 0.44); unseen maps unchanged (D-017) |
 | Test drive UI | done | `python tools/eval_ui.py --config configs/tmnf.yaml` -> http://127.0.0.1:8600 |
 | Takeover mode (human recoveries) | verified live | 15 segments, 2.8 min on A01-A10 (2026-11-20); cut at respawns, restart = new segment |
-| RL test, reward-weighted BC (D-018) | built, fake-tested | `python tools/rl_rounds.py --config configs/tmnf.yaml --ckpt <dagger1 10k> --eval-start`; not run on TMNF yet |
+| RL test, reward-weighted BC (D-018) | done, inconclusive | 3 rounds: A01-A10 mean 0.56 -> 0.61 (CI includes 0), finishes 4 -> 4; best `experiments/2026-11-21-rl_r3` |
 | Stage 2 plan (memory agent) | written | `docs/PLAN_PHASE2.md` |
 
 Test suite: `python -m pytest -q` -> 502 passed, 3 failed, 4 skipped on the Windows PC (2026-11-20,
@@ -72,7 +72,22 @@ Opt-in plugin simulation: `TMAGENT_PLUGIN_SIM=1` (builds an AngelScript host).
   arrays.npz, `target_weight` in training windows, multiplies the loss mask), exact-source
   sampling weights (`dagger:d1` before `dagger`). End-to-end round verified on the fake game
   (collect -> train -> eval -> rl_rounds.jsonl); the dagger1 checkpoint samples correctly
-  offline. Not run on TMNF yet: the game was in use for takeovers.
+  offline.
+- RL run (2026-11-20/21 overnight): start eval + 3 rounds, results in D-018. Mean progress
+  0.56 -> 0.59 -> 0.60 -> 0.61, median 0.56 -> 0.65, finishes unchanged (4); per-map gain
+  +0.054 with a 95 % CI of -0.014 .. +0.124: a trend, not proven. Collection ran at 1.34x
+  real time (60 attempts, 19 min of driving in 14 min). Round 1 training hung once at the
+  step-2000 validation (GPU memory nearly full); rerun with train.eval_every=0.
+- Faster stepping: profile of one A01 eval drive (1.48x real time): step 2.7 ms x 5 per
+  frame (39 %), predict 12.1 ms (36 %), grab 4.3 ms (13 %), observe 3.1 ms (9 %).
+  Built STEP_SEQ (plugin 0.3.0, command 16 / reply STATES 108): one round trip per frame
+  period with the state after every tick; `TMNFGame.step_sequence`, `harness.step_ticks`
+  (used by drive_frame_period and the RL collector), automatic per-tick fallback for older
+  plugins. Fake-plugin tests: identical episodes with and without STEP_SEQ. On the real game
+  plugin 0.3.0 did not start listening after a restart (likely a compile error; the TMI
+  console was not reachable with the Swiss keyboard layout), so 0.2.0 was put back in
+  Documents\TMInterface\Plugins. Next: read the TMI console error, fix, verify determinism
+  (same seed, seq vs per-tick) and measure.
 
 ## 2026-10-07 Session 4 (overnight, autonomous): DAgger
 

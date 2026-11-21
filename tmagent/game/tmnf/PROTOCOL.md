@@ -63,9 +63,11 @@ raw bytes.
 | 13 | STREAM_STATE | `i32 every_n_ticks` (0 = off) | ACK; PUSH_STATE messages (realtime only) |
 | 14 | PING | none | ACK with diagnostics text `guard_rewinds=<n> tick=<n> op=<n>` |
 | 15 | SET_PASSTHROUGH | `i32 on` | ACK; realtime only (ERROR in sync). While on, the plugin sets no inputs and the player's keyboard drives; SET_MODE sync turns it off. Plugin 0.2.0+ |
+| 16 | STEP_SEQ | `i32 n` (0..64), n x INPUT | STATES: the state after each tick (fewer at the finish). Plugin 0.3.0+ |
 
 Plugin -> client types: ACK 101 (`UTF-8 text`), ERROR 102 (`UTF-8 text`), STATE 103,
-FRAME 104, HELLO 105, PUSH_STATE 106, PUSH_FRAME 107. Commands without a documented
+FRAME 104, HELLO 105, PUSH_STATE 106, PUSH_FRAME 107, STATES 108 (`i32 count`, count x
+STATE). Commands without a documented
 reply (`SET_INPUT`) never get any reply, not even ERROR, so reply order stays
 trivial; errors for them are only logged in the game console.
 
@@ -117,6 +119,14 @@ the STEP early with `finished = 1`; STEP on a finished race returns the state at
 `n <= 0` returns the state without running. STEP in realtime mode or without a paused
 race is an ERROR. Frame `t` (REQUEST_FRAME after the step) shows the paused state at
 race time `t`, before the next input is applied (same convention as `interfaces.py`).
+
+**STEP_SEQ(n, inputs)** (sync mode, game paused; plugin 0.3.0+): like n STEPs of one tick
+each, tick i with input i, but without pausing in between and with one reply: STATES with
+the state after every tick (a live read for ticks 1..n-1, the held paused state for the
+last). A finish ends it early (the finished state is the last entry); on a finished race
+or with n = 0 the list is empty. One round trip per frame period instead of five. The
+client uses it only when the HELLO build string says TMAgentLink 0.3.0 or newer and steps
+tick by tick otherwise, so the protocol version stays 1.
 
 **SET_INPUT** (realtime): replaces the held input; the plugin applies it with
 `SetInputState` at every physics callback, so it acts from the next tick on.

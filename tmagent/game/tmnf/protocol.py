@@ -44,6 +44,7 @@ class Cmd(IntEnum):
     STREAM_STATE = 13
     PING = 14
     SET_PASSTHROUGH = 15
+    STEP_SEQ = 16  # plugin 0.3.0+
 
 
 class Rep(IntEnum):
@@ -56,6 +57,7 @@ class Rep(IntEnum):
     HELLO = 105
     PUSH_STATE = 106
     PUSH_FRAME = 107
+    STATES = 108
 
 
 class Mode(IntEnum):
@@ -78,6 +80,7 @@ _FRAME_HEAD = struct.Struct("<iiiii")  # race_time_ms width height pixel_format 
 INPUT_SIZE = _INPUT.size  # 12
 STATE_SIZE = _STATE.size  # 48
 FRAME_HEAD_SIZE = _FRAME_HEAD.size  # 20
+MAX_STEP_SEQ = 64  # inputs per STEP_SEQ (plugin limit)
 HEADER_SIZE = _HEADER.size  # 8
 
 
@@ -231,6 +234,12 @@ def enc_step(req_id: int, n_ticks: int, inp: InputCmd) -> bytes:
     return _cmd(Cmd.STEP, req_id, _I32.pack(n_ticks) + inp.pack())
 
 
+def enc_step_seq(req_id: int, inputs: list[InputCmd]) -> bytes:
+    if len(inputs) > MAX_STEP_SEQ:
+        raise ValueError(f"STEP_SEQ takes at most {MAX_STEP_SEQ} inputs, got {len(inputs)}")
+    return _cmd(Cmd.STEP_SEQ, req_id, _I32.pack(len(inputs)) + b"".join(i.pack() for i in inputs))
+
+
 def enc_set_input(inp: InputCmd) -> bytes:
     return _cmd(Cmd.SET_INPUT, 0, inp.pack())
 
@@ -301,6 +310,12 @@ def _dec_command(msg: Message) -> tuple[Cmd, int, tuple]:
         return cmd, req_id, (RestartMethod(_I32.unpack(body)[0]),)
     if cmd is Cmd.STEP:
         return cmd, req_id, (_I32.unpack_from(body)[0], InputCmd.unpack(body[4:]))
+    if cmd is Cmd.STEP_SEQ:
+        (n,) = _I32.unpack_from(body)
+        inputs = [
+            InputCmd.unpack(body[4 + i * INPUT_SIZE : 4 + (i + 1) * INPUT_SIZE]) for i in range(n)
+        ]
+        return cmd, req_id, (inputs,)
     if cmd is Cmd.SET_INPUT:
         return cmd, req_id, (InputCmd.unpack(body),)
     if cmd is Cmd.REQUEST_FRAME:
@@ -336,6 +351,10 @@ def enc_state(req_id: int, st: StateMsg) -> bytes:
     return _rep(Rep.STATE, req_id, st.pack())
 
 
+def enc_states(req_id: int, states: list[StateMsg]) -> bytes:
+    return _rep(Rep.STATES, req_id, _I32.pack(len(states)) + b"".join(st.pack() for st in states))
+
+
 def enc_frame(req_id: int, fr: FrameMsg) -> bytes:
     return _rep(Rep.FRAME, req_id, fr.pack())
 
@@ -355,7 +374,8 @@ def enc_push_frame(fr: FrameMsg) -> bytes:
 def dec_reply(msg: Message) -> tuple[Rep, int, object]:
     """Parse a plugin message into (type, req_id, value); req_id is 0 for pushes.
 
-    value: str for ACK/ERROR, StateMsg, FrameMsg, (version, build) for HELLO.
+    value: str for ACK/ERROR, StateMsg, list[StateMsg] for STATES, FrameMsg, (version, build)
+    for HELLO.
     """
     try:
         return _dec_reply(msg)
@@ -381,6 +401,12 @@ def _dec_reply(msg: Message) -> tuple[Rep, int, object]:
         return rep, req_id, body.decode(errors="replace")
     if rep is Rep.STATE:
         return rep, req_id, StateMsg.unpack(body)
+    if rep is Rep.STATES:
+        (n,) = _I32.unpack_from(body)
+        states = [
+            StateMsg.unpack(body[4 + i * STATE_SIZE : 4 + (i + 1) * STATE_SIZE]) for i in range(n)
+        ]
+        return rep, req_id, states
     if rep is Rep.FRAME:
         return rep, req_id, FrameMsg.unpack(body)
     return rep, req_id, (_I32.unpack_from(body)[0], body[4:].decode(errors="replace"))  # HELLO

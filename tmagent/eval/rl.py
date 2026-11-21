@@ -17,7 +17,7 @@ import numpy as np
 
 from tmagent.config import Config
 from tmagent.data.timeline import control_times_ms, frame_times_ms
-from tmagent.eval.harness import control_row_for_tick
+from tmagent.eval.harness import control_row_for_tick, step_ticks
 from tmagent.eval.progress import ProgressTracker, ReferencePath
 from tmagent.interfaces import PHYSICS_TICK_MS, Action, Episode, SyncGame
 from tmagent.model.policy import steer_bin_centers
@@ -100,6 +100,11 @@ def collect_attempt(
         rows = sample_rows(policy.predict_outputs(), r, rng, rcfg.temperature)
 
         t_next = round((k + 1) * 1000 / d.frame_hz)
+        tick_times = range(int(state.race_time_ms), t_next, PHYSICS_TICK_MS)
+        tick_actions = [
+            Action.from_array(rows[control_row_for_tick(t, k, d.control_hz, r)]) for t in tick_times
+        ]
+        after = iter(step_ticks(game, tick_actions))
         while state.race_time_ms < t_next and not tracker.done:
             t = int(state.race_time_ms)
             while (
@@ -110,8 +115,10 @@ def collect_attempt(
                 speeds.append(float(state.speed_kmh))
                 line.append(tracker.s)
 
-            j = control_row_for_tick(t, k, d.control_hz, r)
-            state = game.step(Action.from_array(rows[j]), 1)
+            nxt = next(after, None)
+            if nxt is None:
+                raise RuntimeError(f"game returned no state for the tick at {t} ms")
+            state = nxt
             ticks += 1
             tracker.update(state)
             if tracker.max_s > best_s + rcfg.stall_m:

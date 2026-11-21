@@ -354,6 +354,21 @@ class FakePluginServer:
                         break
                     self._tick()
                 send(P.enc_state(rid, self._state()))
+        elif cmd is P.Cmd.STEP_SEQ:
+            (inputs,) = args
+            if self.mode is not P.Mode.SYNC:
+                send(err(rid, "STEP_SEQ requires sync mode"))
+            elif not self.in_race:
+                send(err(rid, "no race ready; LOAD_MAP first"))
+            else:
+                states = []
+                for inp in inputs:
+                    if self.finished:
+                        break
+                    self.input = inp
+                    self._tick()
+                    states.append(self._state())
+                send(P.enc_states(rid, states))
         elif cmd is P.Cmd.SET_INPUT:
             self.input = args[0]
         elif cmd is P.Cmd.REQUEST_FRAME:

@@ -241,4 +241,25 @@ and rejected. Numbers only from own measurements.
   logged to data/tmnf/rl_rounds.jsonl. Start: dagger1 10k (A01-A10 median 0.60).
 - Budget: one round ~70 min on the user PC (6 attempts x 10 maps ~30 min, training ~23 min,
   eval ~15 min). One game instance.
-- Status: built and tested on the fake game; not yet run on TMNF.
+- Results (2026-11-21, 3 rounds, 60 sampled attempts each; eval 10 maps x 3 attempts):
+
+  | | median | mean | finishes |
+  |---|---|---|---|
+  | dagger1 10k (start) | 0.56 | 0.56 | 4 |
+  | rl r1 | 0.47 | 0.59 | 5 |
+  | rl r2 | 0.58 | 0.60 | 4 |
+  | rl r3 | 0.65 | 0.61 | 4 |
+
+  Per-map mean progress vs start: r3 +0.054 (bootstrap 95 % CI over maps -0.014 .. +0.124),
+  5 maps better / 2 worse. Consistent gains on A02 (0.73 -> 0.97-0.99), A05 (0.41 ->
+  0.60-0.65), A08 (0.22 -> 0.33); A04 (stunt map, unreliable progress) lower, A07 stuck at
+  0.07 in every round (all attempts crash at the same spot, so the same-place baseline gives
+  no advantage signal there). Finish count and finish times did not improve.
+- Confound: every RL round also trained on the 696 user replays that dagger1 never saw.
+- Verdict: a small upward trend across rounds, not significant with this eval size; no
+  finish-rate gain. Not worth more rounds at ~1.2 h each. Throughput is the limit: the next
+  step is faster sync stepping (fewer round trips per frame) before larger RL runs.
+- Incident: round 1 training hung at the step-2000 validation (GPU memory at 7.6 / 8.2 GB,
+  main process spinning) for 50 min; restarted with train.eval_every=0 (validation only at
+  the end), no further hangs.
+- Status: done, inconclusive.

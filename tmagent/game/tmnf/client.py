@@ -312,6 +312,13 @@ class TMAgentClient:
         _, st = self._request(lambda rid: P.enc_step(rid, n_ticks, inp), t)
         return st  # type: ignore[return-value]
 
+    def step_seq(self, inputs: list[P.InputCmd], timeout: float | None = None) -> list[P.StateMsg]:
+        """Sync mode: tick i runs with inputs[i]; the state after every tick (fewer at the
+        finish); paused afterwards. One round trip. Plugin 0.3.0+."""
+        t = self.request_timeout + 0.02 * len(inputs) if timeout is None else timeout
+        _, states = self._request(lambda rid: P.enc_step_seq(rid, inputs), t)
+        return states  # type: ignore[return-value]
+
     def set_input(self, inp: P.InputCmd) -> None:
         """Realtime: replace the held input from the next tick on. No reply, no waiting."""
         self._send(P.enc_set_input(inp))

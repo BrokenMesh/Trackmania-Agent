@@ -96,7 +96,7 @@
 
 const int PROTOCOL_VERSION = 1;
 const string PLUGIN_NAME = "TMAgentLink";
-const string PLUGIN_VERSION = "0.2.0";
+const string PLUGIN_VERSION = "0.3.0";
 const string HOST = "127.0.0.1";
 const int DEFAULT_PORT = 8477;
 const int PORT_TRIES = 8;              // instances 1..8 listen on DEFAULT_PORT + 0..7
@@ -125,6 +125,7 @@ const int CMD_CLOSE = 12;
 const int CMD_STREAM_STATE = 13;
 const int CMD_PING = 14;
 const int CMD_SET_PASSTHROUGH = 15;
+const int CMD_STEP_SEQ = 16;
 
 // plugin -> client
 const int REP_ACK = 101;
@@ -134,6 +135,8 @@ const int REP_FRAME = 104;
 const int REP_HELLO = 105;
 const int REP_PUSH_STATE = 106;
 const int REP_PUSH_FRAME = 107;
+const int REP_STATES = 108;
+const int MAX_STEP_SEQ = 64;            // inputs per STEP_SEQ
 
 const int RESTART_REWIND = 0;
 const int RESTART_GIVE_UP = 1;
@@ -144,6 +147,7 @@ const int OP_LOAD_WAIT = 1;     // waiting for race time 0 of a new race (LOAD_M
 const int OP_STEP = 2;          // running until the target race time
 const int OP_RESTART = 3;       // rewind to the start state at the next OnRunStep
 const int OP_PAUSE = 4;         // SET_MODE sync while a race runs: pause at the next OnRunStep
+const int OP_STEP_SEQ = 5;      // like OP_STEP, one input per tick, a state recorded per tick
 
 // ================================================================== 2. API shims
 // One helper per game API that is not fully verified. A first-run fix is a one-line edit.
@@ -258,6 +262,9 @@ int g_op = OP_NONE;
 int g_opReq = 0;
 bool g_opIsLoad = false;          // OP_LOAD_WAIT reply kind: true = ACK(map info), false = STATE
 int g_stepTarget = 0;
+array<LinkInput@> g_seqInputs;    // OP_STEP_SEQ: input of tick i
+array<Snapshot@> g_seqStates;     // OP_STEP_SEQ: state after tick i + 1
+int g_seqStart = 0;               // OP_STEP_SEQ: race time before the first tick
 bool g_loadArmed = false;         // a NEW race (not the old one) has started since the op began
 int g_tick = 0;                   // OnRunStep calls since the client connected
 int g_guardRewinds = 0;
@@ -452,6 +459,15 @@ void ReplyState(int req, Snapshot@ s)
     SendDone(SendHeader(REP_STATE, 4 + 48) && g_client.Write(req) && WriteSnapshot(s));
 }
 
+void ReplyStates(int req)
+{
+    if (g_client is null) return;
+    int n = int(g_seqStates.Length);
+    bool ok = SendHeader(REP_STATES, 8 + 48 * n) && g_client.Write(req) && g_client.Write(n);
+    for (int i = 0; i < n && ok; i++) ok = WriteSnapshot(g_seqStates[i]);
+    SendDone(ok);
+}
+
 void PushState()
 {
     if (g_client is null) return;
@@ -621,6 +637,43 @@ void CmdStep(int req)
     ResumeFromPause();
 }
 
+// STEP_SEQ(n, n inputs): tick i runs with input i, no pause in between; the reply holds the
+// state after every tick (fewer at the finish). One round trip instead of n STEPs.
+void CmdStepSeq(int req)
+{
+    int n = RdI32();
+    if (g_bad) return;
+    if (n < 0 || n > MAX_STEP_SEQ) { ReplyError(req, "STEP_SEQ: n must be 0.." + MAX_STEP_SEQ); return; }
+    g_seqInputs.Resize(0);
+    for (int i = 0; i < n; i++) {
+        LinkInput@ inp = LinkInput();
+        RdInput(inp);
+        g_seqInputs.InsertLast(inp);
+    }
+    if (g_bad) return;
+    CancelPendingOp();
+    if (!g_syncMode) { ReplyError(req, "STEP_SEQ requires sync mode"); return; }
+    if (!g_paused || g_pausedState is null) { ReplyError(req, "STEP_SEQ: no race is paused (LOAD_MAP / RESTART first)"); return; }
+    g_seqStates.Resize(0);
+    if (n == 0 || g_finished) { ReplyStates(req); return; }
+    g_seqStart = g_pausedRaceTime;
+    g_in = g_seqInputs[0];
+    g_stepTarget = g_pausedRaceTime + n * TICK_MS;
+    g_op = OP_STEP_SEQ;
+    g_opReq = req;
+    ResumeFromPause();
+}
+
+// Keep one state per tick: a second callback for the same race time is not recorded twice.
+// The final (paused or finished) state always ends the list, replacing a live read of its tick.
+void RecordSeqState(int ticksRun, Snapshot@ s, bool final)
+{
+    int n = int(g_seqStates.Length);
+    if (ticksRun >= 1 && n < ticksRun) g_seqStates.InsertLast(s);
+    else if (final && n > 0) @g_seqStates[n - 1] = s;
+    else if (final) g_seqStates.InsertLast(s);
+}
+
 void CmdRequestFrame(int req)
 {
     int w = RdI32();
@@ -653,6 +706,8 @@ void HandleCommand(int type)
         CmdRestart(req);
     } else if (type == CMD_STEP) {
         CmdStep(req);
+    } else if (type == CMD_STEP_SEQ) {
+        CmdStepSeq(req);
     } else if (type == CMD_SET_INPUT) {                // no reply, ever
         RdInput(g_in);
     } else if (type == CMD_REQUEST_FRAME) {
@@ -767,6 +822,20 @@ void AdvanceOp(SimulationManager@ sm, int rt)
             EnterPause(sm, g_finished ? g_finishTime : rt);
             ReplyState(g_opReq, CurrentSnapshot());
         }
+    } else if (g_op == OP_STEP_SEQ) {
+        if (!g_finished && ApiPlayerFinished(sm)) { g_finished = true; g_finishTime = rt; g_finishTick = g_tick; }
+        int ticksRun = rt > g_seqStart ? (rt - g_seqStart) / TICK_MS : 0;
+        bool done = g_finished ? g_tick > g_finishTick : rt >= g_stepTarget;
+        if (done) {
+            g_op = OP_NONE;
+            EnterPause(sm, g_finished ? g_finishTime : rt);
+            RecordSeqState(ticksRun, CurrentSnapshot(), true);
+            ReplyStates(g_opReq);
+        } else {
+            RecordSeqState(ticksRun, MakeSnapshot(null, rt), false);
+            int last = int(g_seqInputs.Length) - 1;
+            g_in = g_seqInputs[ticksRun < last ? ticksRun : last];   // ApplyInput follows
+        }
     } else if (g_op == OP_PAUSE) {
         g_op = OP_NONE;
         EnterPause(sm, rt);
@@ -819,6 +888,11 @@ void OnCheckpointCountChanged(SimulationManager@ sm, int current, int target)
         g_op = OP_NONE;                                 // finish ends a STEP early
         EnterPause(sm, g_finishTime);
         ReplyState(g_opReq, CurrentSnapshot());
+    } else if (g_client !is null && g_op == OP_STEP_SEQ && !g_paused) {
+        g_op = OP_NONE;                                 // and a STEP_SEQ
+        EnterPause(sm, g_finishTime);
+        RecordSeqState((g_finishTime - g_seqStart) / TICK_MS, CurrentSnapshot(), true);
+        ReplyStates(g_opReq);
     }
 }
 

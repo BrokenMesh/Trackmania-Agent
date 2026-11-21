@@ -35,6 +35,7 @@ from tmagent.game.tmnf.window import SCAN_ENTER, focus_game_window, pid_listenin
 from tmagent.interfaces import Action, Frame, GameState
 
 MAP_SUFFIX = ".Challenge.Gbx"
+STEP_SEQ_VERSION = (0, 3, 0)  # first plugin build with STEP_SEQ
 STREAM_FPS_FACTOR = 2  # realtime frame push rate = factor * data.frame_hz (less staleness)
 STATE_PUSH_EVERY_TICKS = 1  # realtime STATE push period in physics ticks
 FRAME_SETTLE_RENDERS = 1  # Render() calls the plugin waits before a capture (UNVERIFIED need)
@@ -278,6 +279,12 @@ class TMNFGame:
     def plugin_build(self) -> str:
         return self.client.hello.build if self.client.hello else ""
 
+    @property
+    def has_step_seq(self) -> bool:
+        """The plugin understands STEP_SEQ (TMAgentLink 0.3.0+)."""
+        m = re.match(r"TMAgentLink (\d+)\.(\d+)\.(\d+)", self.plugin_build)
+        return m is not None and tuple(int(v) for v in m.groups()) >= STEP_SEQ_VERSION
+
     def _enter(self, mode: P.Mode) -> None:
         """Switch the plugin between sync (paused, stepped) and realtime (free-running)."""
         c, cfg, w_h = self.client, self.cfg, tuple(self.data_cfg.resolution)
@@ -378,6 +385,30 @@ class TMNFGame:
         g = self.cfg
         inp = action_to_input(action, g.steer_mode, g.steer_threshold, self._steer_mod)
         return to_game_state(c.step(n_ticks, inp))
+
+    def step_sequence(self, actions: list[Action]) -> list[GameState]:
+        """Tick i runs with actions[i]; returns the state after every tick (fewer at the
+        finish), paused afterwards. Same ticks as step(action, 1) per action, but one round
+        trip per MAX_STEP_SEQ ticks when the plugin supports STEP_SEQ."""
+        c = self._ensure(P.Mode.SYNC)
+        g = self.cfg
+        inputs = [
+            action_to_input(a, g.steer_mode, g.steer_threshold, self._steer_mod) for a in actions
+        ]
+        if not self.has_step_seq:
+            states = []
+            for inp in inputs:
+                states.append(to_game_state(c.step(1, inp)))
+                if states[-1].finished:
+                    break
+            return states
+
+        states = []
+        for i in range(0, len(inputs), P.MAX_STEP_SEQ):
+            states += [to_game_state(st) for st in c.step_seq(inputs[i : i + P.MAX_STEP_SEQ])]
+            if states and states[-1].finished:
+                break
+        return states
 
     def grab_frame(self) -> Frame:
         """Capture the paused state at data.resolution / data.channels."""
